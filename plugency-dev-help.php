@@ -61,6 +61,9 @@ function list_included_files_and_assets() {
             cursor: pointer;
             font-size: 20px;
             z-index: 99999;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
         .dev-help-icon img{filter: brightness(0) saturate(100%) invert(100%) sepia(0%) saturate(7463%) hue-rotate(174deg) brightness(110%) contrast(99%);}
         .dev-help-tabs {
