@@ -11,6 +11,9 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
+
+
+
 function list_included_files_and_assets() {
     // Check if the user is logged in and is an admin
     if (!is_user_logged_in() || !current_user_can('administrator')) {
@@ -137,6 +140,9 @@ function list_included_files_and_assets() {
                 <pre><?php print_r($enqueued_scripts); ?></pre>
             </div>
             <div id="debug" class="dev-help-section">
+                <?php if (!defined('WP_DEBUG') || !WP_DEBUG) {
+                        echo '<div><p><strong>WP_DEBUG is not enabled.</strong> Please enable it in wp-config.php for debugging features.</p></div>';
+                } ?>
                 <h3>Debug File <span class="trash-icon" onclick="deleteDebugFile()">🗑</span></h3>
                 <pre id="debug-content"><?php echo htmlspecialchars($debug_content); ?></pre>
             </div>
@@ -185,4 +191,5 @@ function delete_debug_file() {
 add_action('wp_ajax_delete_debug_file', 'delete_debug_file');
 add_action('wp_footer', 'list_included_files_and_assets');
 add_action('admin_footer', 'list_included_files_and_assets');
+
 
