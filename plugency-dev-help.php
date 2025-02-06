@@ -1,8 +1,8 @@
 <?php
 /**
  * Plugin Name: Plugency Dev Help
- * Description: Displays included PHP files and enqueued CSS/JS files for developers (Admin access only).
- * Version: 1.1
+ * Description: Displays included PHP files, enqueued CSS/JS files, and request data for developers (Admin access only).
+ * Version: 1.2
  * Author: Raihan Hossain
  */
 
@@ -10,9 +10,6 @@
 if (!defined('ABSPATH')) {
     exit;
 }
-
-
-
 
 function list_included_files_and_assets() {
     // Check if the user is logged in and is an admin
@@ -24,7 +21,7 @@ function list_included_files_and_assets() {
     $included_files = get_included_files();
     
     // Get enqueued styles and scripts
-    global $wp_styles, $wp_scripts;
+    global $wp_styles, $wp_scripts, $wpdb;
 
     $enqueued_styles = [];
     $enqueued_scripts = [];
@@ -43,6 +40,33 @@ function list_included_files_and_assets() {
     if (file_exists($debug_file_path) && is_readable($debug_file_path)) {
         $debug_content = file_get_contents($debug_file_path);
     }
+
+    // Get request data
+    $request_data = [
+        'GET' => $_GET,
+        'POST' => $_POST,
+        'COOKIE' => $_COOKIE,
+        'SERVER' => $_SERVER,
+        'FILES' => $_FILES,
+        'REQUEST' => $_REQUEST,
+        'SESSION' => isset($_SESSION) ? $_SESSION : [],
+        'ENV' => $_ENV
+    ];
+
+    // Get database queries if SAVEQUERIES is enabled
+    $db_queries = [];
+    if (defined('SAVEQUERIES') && SAVEQUERIES) {
+        $db_queries = $wpdb->queries;
+    }else{
+        $db_queries = ["enable database query in wp-config.php define('SAVEQUERIES', true);"];
+    }
+    // Count total number of requests
+    $total_requests = array_sum(array_map('count', $request_data)) + count($db_queries);
+    $total_get = count($_GET);
+    $total_post = count($_POST);
+    $total_cookie = count($_COOKIE);
+    $total_server = count($_SERVER);
+    $total_db = count($db_queries);
     ?>
     <style>
         pre#debug-content {
@@ -113,6 +137,9 @@ function list_included_files_and_assets() {
         .dev-help-section.active {
             display: block;
         }
+        .dev-help-section h4 {
+            margin: 20px 0;
+        }
         .trash-icon {
             float: right;
             cursor: pointer;
@@ -128,6 +155,7 @@ function list_included_files_and_assets() {
             <button onclick="showTab('css')">CSS Files</button>
             <button onclick="showTab('js')">JS Files</button>
             <button onclick="showTab('debug')">Debug File</button>
+            <button onclick="showTab('requests')">Requests</button>
         </div>
         <div class="dev-help-content">
             <div id="php" class="dev-help-section active">
@@ -140,11 +168,27 @@ function list_included_files_and_assets() {
                 <pre><?php print_r($enqueued_scripts); ?></pre>
             </div>
             <div id="debug" class="dev-help-section">
-                <?php if (!defined('WP_DEBUG') || !WP_DEBUG) {
-                        echo '<div><p><strong>WP_DEBUG is not enabled.</strong> Please enable it in wp-config.php for debugging features.</p></div>';
-                } ?>
                 <h3>Debug File <span class="trash-icon" onclick="deleteDebugFile()">🗑</span></h3>
                 <pre id="debug-content"><?php echo htmlspecialchars($debug_content); ?></pre>
+            </div>
+            <div id="requests" class="dev-help-section">
+                <h3>Total Requests: <?php echo $total_requests; ?>, Get: <?php echo $total_get; ?>, Post: <?php echo $total_post; ?>, Cookie: <?php echo $total_cookie; ?>, Server: <?php echo $total_server; ?>, Database: <?php echo $total_db; ?></h3>
+                <h4>GET Requests</h4>
+                <pre><?php print_r($_GET); ?></pre>
+                <h4>POST Requests</h4>
+                <pre><?php print_r($_POST); ?></pre>
+                <h4>COOKIE Data</h4>
+                <pre><?php print_r($_COOKIE); ?></pre>
+                <h4>SERVER Data</h4>
+                <pre><?php print_r($_SERVER); ?></pre>
+                <h4>FILES Data</h4>
+                <pre><?php print_r($_FILES); ?></pre>
+                <h4>SESSION Data</h4>
+                <pre><?php isset($_SESSION) ? print_r($_SESSION) : []; ?></pre>
+                <h4>ENV Data</h4>
+                <pre><?php print_r($_ENV); ?></pre>
+                <h4>Database Queries</h4>
+                <pre><?php print_r($db_queries); ?></pre>
             </div>
         </div>
     </div>
@@ -176,7 +220,6 @@ function list_included_files_and_assets() {
     </script>
     <?php
 }
-
 function delete_debug_file() {
     $debug_file_path = ABSPATH . 'wp-content/debug.log';
     if (file_exists($debug_file_path)) {
@@ -187,9 +230,6 @@ function delete_debug_file() {
     }
     wp_die();
 }
-
 add_action('wp_ajax_delete_debug_file', 'delete_debug_file');
 add_action('wp_footer', 'list_included_files_and_assets');
 add_action('admin_footer', 'list_included_files_and_assets');
-
-
