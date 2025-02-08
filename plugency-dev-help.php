@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Plugency Dev Help
  * Description: Displays included PHP files, enqueued CSS/JS files, and request data for developers (Admin access only).
- * Version: 1.2
+ * Version: 1.0.0
  * Author: Raihan Hossain
  */
 
@@ -67,7 +67,7 @@ function list_included_files_and_assets() {
     $total_cookie = count($_COOKIE);
     $total_server = count($_SERVER);
     $total_files = count($_FILES);
-    $total_session = count($_SESSION);
+    $total_session = isset($_SESSION) ? count($_SESSION) : 0;
     $total_db = count($db_queries);
     $total_env = count($_ENV);
 
