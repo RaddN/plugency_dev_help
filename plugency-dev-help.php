@@ -13,7 +13,8 @@ if (!defined('ABSPATH')) {
 
 
 function plugency_enqueue_styles() {
-    wp_enqueue_style('plugency-style', plugin_dir_url(__FILE__) . 'style.css');
+    wp_enqueue_style('plugency-style', plugin_dir_url(__FILE__) . 'style.css',array(), "1.0.0",false);
+    wp_enqueue_script('plugency-script', plugin_dir_url(__FILE__) . 'script.js', array(), "1.0.0", true);
 }
 add_action('wp_enqueue_scripts', 'plugency_enqueue_styles');
 add_action('admin_enqueue_scripts', 'plugency_enqueue_styles');
@@ -104,19 +105,6 @@ function list_included_files_and_assets() {
             <div id="debug" class="dev-help-section">
                 <h3>Debug File <span class="trash-icon" onclick="deleteDebugFile()">🗑</span></h3>
                 <button id="toggleDebugLog"> <?php echo $debug_logging_enabled ? 'Disable' : 'Enable'; ?> Debug Log</button>
-                <script>
-                    document.getElementById('toggleDebugLog').addEventListener('click', function() {
-                        const status = this.innerText.includes('Enable') ? 'on' : 'off';
-                        fetch("<?php echo admin_url('admin-ajax.php'); ?>", {
-                            method: "POST",
-                            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                            body: "action=toggle_debug_log&status=" + status
-                        }).then(response => response.text()).then(data => {
-                            document.getElementById('debugLogStatus').innerText = data;
-                            location.reload(); // Reload to reflect changes
-                        });
-                    });
-                </script>
         <p id="debugLogStatus"></p>
                 <pre id="debug-content"><?php echo htmlspecialchars($debug_content); ?></pre>
             </div>
@@ -147,29 +135,6 @@ function list_included_files_and_assets() {
             </div>
         </div>
     </div>
-    <script>
-        function toggleDevHelp() {
-            let panel = document.getElementById("devHelpTabs");
-            panel.style.display = panel.style.display === "block" ? "none" : "block";
-        }
-        function showTab(tab) {
-            document.querySelectorAll('.dev-help-section').forEach(section => section.classList.remove('active'));
-            document.querySelectorAll('.dev-help-nav button').forEach(button => button.classList.remove('active'));
-            document.getElementById(tab).classList.add('active');
-            event.target.classList.add('active');
-        }
-        function showRequestTab(tab) {
-            document.querySelectorAll('.request-section').forEach(section => section.style.display = 'none');
-            document.getElementById(tab).style.display = 'block';
-        }
-        function deleteDebugFile() {
-            if (confirm("Delete the debug file?")) {
-                fetch("<?php echo admin_url('admin-ajax.php'); ?>?action=delete_debug_file", { method: "POST" })
-                .then(response => response.text())
-                .then(data => { alert(data); document.getElementById("debug-content").innerText = "Debug file not found or unreadable."; });
-            }
-        }
-    </script>
     <?php
 }
 function delete_debug_file() {
@@ -267,20 +232,6 @@ function plugency_admin_settings() {
         <button id="toggleQueryLogging"><?php echo defined('SAVEQUERIES') && SAVEQUERIES ? 'Disable' : 'Enable'; ?> Query Logging</button>
         <p id="queryToggleMsg"></p>
     </div>
-
-    <script>
-        document.getElementById('toggleQueryLogging').addEventListener('click', function() {
-            let status = this.innerText.includes('Enable') ? 'on' : 'off';
-            fetch("<?php echo admin_url('admin-ajax.php'); ?>", {
-                method: "POST",
-                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                body: "action=toggle_query_logging&status=" + status
-            }).then(response => response.text()).then(data => {
-                document.getElementById('queryToggleMsg').innerText = data;
-                location.reload();
-            });
-        });
-    </script>
     <?php
 }
 function toggle_debug_log() {

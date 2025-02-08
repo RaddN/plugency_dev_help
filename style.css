@@ -78,3 +78,11 @@ pre#debug-content {
     color: red;
     font-size: 20px;
 }
+pre {
+    background: #eceff3;
+    font-family: "Courier 10 Pitch", Courier, monospace;
+    margin-bottom: 1.6em;
+    overflow: auto;
+    max-width: 100%;
+    padding: 1.6em;
+}
