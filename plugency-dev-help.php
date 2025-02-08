@@ -161,8 +161,6 @@ function plugency_toggle_query_logging($enable) {
         return "Error: wp-config.php is not writable.";
     }
 
-    error_log("hello");
-
     // Get the current contents of wp-config.php
     $config_content = file_get_contents($wp_config_path);
     
