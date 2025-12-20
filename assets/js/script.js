@@ -27,6 +27,9 @@
         const replayOutput = panel ? panel.querySelector('#plugencyReplayOutput pre') : null;
         const replayStatus = panel ? panel.querySelector('#plugencyReplayStatus') : null;
         const replayTimeoutInput = panel ? panel.querySelector('[data-role="replay-timeout"]') : null;
+        const requestMenu = panel ? panel.querySelector('[data-role="request-menu"]') : null;
+        const requestMenuToggle = panel ? panel.querySelector('[data-action="toggle-request-menu"]') : null;
+        const performanceSection = panel ? panel.querySelector('[data-section="performance"]') : null;
         const closeBtn = panel ? panel.querySelector('[data-action="close-panel"]') : null;
 
         if (!launcher || !panel) {
@@ -398,6 +401,525 @@
                 replayStatus.textContent = message;
                 replayStatus.className = `plugency-status ${type}`;
             }
+        };
+
+        const closeRequestMenu = () => {
+            if (requestMenu && requestMenuToggle) {
+                requestMenu.classList.remove('open');
+                requestMenuToggle.setAttribute('aria-expanded', 'false');
+            }
+        };
+
+        const toggleRequestMenu = (event) => {
+            if (!requestMenu || !requestMenuToggle) {
+                return;
+            }
+            event.stopPropagation();
+            const isOpen = requestMenu.classList.toggle('open');
+            requestMenuToggle.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+        };
+
+        const initPerformanceTab = () => {
+            if (!performanceSection) {
+                return;
+            }
+
+            const perfDom = performanceSection.querySelector('[data-role="perf-dom"]');
+            const perfLoad = performanceSection.querySelector('[data-role="perf-load"]');
+            const perfTtfb = performanceSection.querySelector('[data-role="perf-ttfb"]');
+            const perfTransfer = performanceSection.querySelector('[data-role="perf-transfer"]');
+            const perfBadge = performanceSection.querySelector('[data-role="perf-badge"]');
+            const perfNote = performanceSection.querySelector('[data-role="perf-note"]');
+            const perfOppsList = performanceSection.querySelector('[data-role="perf-opps"]');
+            const perfOppsCount = performanceSection.querySelector('[data-role="perf-opps-count"]');
+            const stylesList = performanceSection.querySelector('[data-role="perf-styles-list"]');
+            const stylesMeta = performanceSection.querySelector('[data-role="perf-styles-meta"]');
+            const scriptsList = performanceSection.querySelector('[data-role="perf-scripts-list"]');
+            const scriptsMeta = performanceSection.querySelector('[data-role="perf-scripts-meta"]');
+            const imagesList = performanceSection.querySelector('[data-role="perf-images-list"]');
+            const imagesMeta = performanceSection.querySelector('[data-role="perf-images-meta"]');
+            const metricsList = performanceSection.querySelector('[data-role="perf-metrics-list"]');
+            const metricsMeta = performanceSection.querySelector('[data-role="perf-metrics-meta"]');
+            const accordionTriggers = performanceSection.querySelectorAll('.plugency-accordion-trigger');
+
+            const formatMs = (val) => {
+                if (typeof val !== 'number' || Number.isNaN(val) || val < 0) {
+                    return 'n/a';
+                }
+                if (val >= 1000) {
+                    return `${(val / 1000).toFixed(2)} s`;
+                }
+                return `${Math.round(val)} ms`;
+            };
+
+            const formatBytes = (val) => {
+                if (typeof val !== 'number' || Number.isNaN(val) || val <= 0) {
+                    return '0 B';
+                }
+                if (val >= 1024 * 1024) {
+                    return `${(val / (1024 * 1024)).toFixed(1)} MB`;
+                }
+                if (val >= 1024) {
+                    return `${(val / 1024).toFixed(1)} KB`;
+                }
+                return `${Math.round(val)} B`;
+            };
+
+            const normalizeKey = (url) => {
+                if (!url) {
+                    return '';
+                }
+                try {
+                    return new URL(url, window.location.href).href.split('#')[0];
+                } catch (e) {
+                    return (url || '').split('#')[0];
+                }
+            };
+
+            const guessType = (url) => {
+                const lower = (url || '').toLowerCase();
+                const match = lower.match(/\.([a-z0-9]+)(?:\?|$)/);
+                return match ? match[1] : 'unknown';
+            };
+
+            const getResourceEntries = () => {
+                if (typeof performance === 'undefined' || !performance.getEntriesByType) {
+                    return [];
+                }
+                return performance.getEntriesByType('resource') || [];
+            };
+
+            const buildResourceIndex = (entries) => {
+                const index = new Map();
+                entries.forEach((entry) => {
+                    if (!entry || !entry.name) {
+                        return;
+                    }
+                    const key = normalizeKey(entry.name);
+                    if (key) {
+                        index.set(key, entry);
+                        const noQuery = key.split('?')[0];
+                        if (noQuery && !index.has(noQuery)) {
+                            index.set(noQuery, entry);
+                        }
+                    }
+                });
+                return index;
+            };
+
+            const getResourceBySrc = (src, index) => {
+                if (!src || !index) {
+                    return null;
+                }
+                const key = normalizeKey(src);
+                if (index.has(key)) {
+                    return index.get(key);
+                }
+                const noQuery = key.split('?')[0];
+                if (index.has(noQuery)) {
+                    return index.get(noQuery);
+                }
+                return null;
+            };
+
+            const collectNavigationMetrics = () => {
+                if (typeof performance === 'undefined') {
+                    return {};
+                }
+                const navEntry = performance.getEntriesByType && performance.getEntriesByType('navigation')[0];
+                if (navEntry) {
+                    return {
+                        domContentLoaded: navEntry.domContentLoadedEventEnd,
+                        load: navEntry.loadEventEnd,
+                        ttfb: navEntry.responseStart,
+                        transfer: navEntry.transferSize || navEntry.decodedBodySize || navEntry.encodedBodySize || 0,
+                    };
+                }
+                const timing = performance.timing;
+                if (timing && timing.responseEnd) {
+                    return {
+                        domContentLoaded: timing.domContentLoadedEventEnd - timing.navigationStart,
+                        load: timing.loadEventEnd - timing.navigationStart,
+                        ttfb: timing.responseStart - timing.navigationStart,
+                        transfer: 0,
+                    };
+                }
+                return {};
+            };
+
+            const summarizeResources = (entries) => {
+                const summary = {
+                    totalCount: 0,
+                    totalTransfer: 0,
+                    css: { count: 0, transfer: 0 },
+                    js: { count: 0, transfer: 0 },
+                    img: { count: 0, transfer: 0 },
+                    font: { count: 0, transfer: 0 },
+                    other: { count: 0, transfer: 0 },
+                    externalCount: 0,
+                    externalTransfer: 0,
+                };
+                const host = window.location.host;
+                entries.forEach((entry) => {
+                    if (!entry || !entry.name) {
+                        return;
+                    }
+                    const type = (entry.initiatorType || '').toLowerCase();
+                    const bytes = entry.transferSize || entry.decodedBodySize || entry.encodedBodySize || 0;
+                    summary.totalCount += 1;
+                    summary.totalTransfer += bytes;
+                    const target = (() => {
+                        if (['link', 'css', 'style'].includes(type)) {
+                            return 'css';
+                        }
+                        if (type === 'script' || type === 'xmlhttprequest' || type === 'fetch') {
+                            return 'js';
+                        }
+                        if (type === 'img' || type === 'image') {
+                            return 'img';
+                        }
+                        if (type === 'font') {
+                            return 'font';
+                        }
+                        if (entry.name && /\.(woff2?|ttf|otf)(\?|$)/.test(entry.name.toLowerCase())) {
+                            return 'font';
+                        }
+                        return 'other';
+                    })();
+                    summary[target].count += 1;
+                    summary[target].transfer += bytes;
+                    const entryHost = (() => {
+                        try {
+                            return new URL(entry.name).host;
+                        } catch (e) {
+                            return '';
+                        }
+                    })();
+                    if (entryHost && host && entryHost !== host) {
+                        summary.externalCount += 1;
+                        summary.externalTransfer += bytes;
+                    }
+                });
+                return summary;
+            };
+
+            const mapAssetsToUsage = (assets, resourceIndex) => {
+                return (Array.isArray(assets) ? assets : []).map((asset) => {
+                    const src = asset && asset.src ? asset.src : '';
+                    const resource = getResourceBySrc(src, resourceIndex);
+                    const status = src ? (resource ? 'loaded' : 'not-requested') : 'inline';
+                    const transfer = resource ? (resource.transferSize || resource.decodedBodySize || resource.encodedBodySize || 0) : (asset && asset.bytes ? asset.bytes : 0);
+                    const duration = resource ? resource.duration : (asset && asset.fetch_ms ? asset.fetch_ms : null);
+                    let host = '';
+                    if (src) {
+                        try {
+                            host = new URL(src, window.location.href).host;
+                        } catch (e) {
+                            host = '';
+                        }
+                    }
+                    return {
+                        name: asset && asset.handle ? asset.handle : 'unknown',
+                        src,
+                        transfer,
+                        duration,
+                        status,
+                        host,
+                        category: asset && (asset.category_label || asset.category) ? (asset.category_label || asset.category) : '',
+                    };
+                });
+            };
+
+            const collectImages = (resourceIndex) => {
+                const nodes = Array.from(document.images || []);
+                const map = new Map();
+                nodes.forEach((img) => {
+                    const src = img.currentSrc || img.src || '';
+                    if (!src) {
+                        return;
+                    }
+                    const key = normalizeKey(src);
+                    const rect = img.getBoundingClientRect();
+                    const existing = map.get(key) || {
+                        src,
+                        count: 0,
+                        renderedWidth: 0,
+                        renderedHeight: 0,
+                        naturalWidth: 0,
+                        naturalHeight: 0,
+                        transfer: null,
+                        duration: null,
+                        type: guessType(src),
+                        sample: img,
+                    };
+                    existing.count += 1;
+                    existing.renderedWidth = Math.max(existing.renderedWidth, Math.round(rect.width));
+                    existing.renderedHeight = Math.max(existing.renderedHeight, Math.round(rect.height));
+                    existing.naturalWidth = Math.max(existing.naturalWidth, img.naturalWidth || 0);
+                    existing.naturalHeight = Math.max(existing.naturalHeight, img.naturalHeight || 0);
+                    const resource = getResourceBySrc(src, resourceIndex);
+                    if (resource && (existing.transfer === null || existing.transfer === 0)) {
+                        existing.transfer = resource.transferSize || resource.decodedBodySize || resource.encodedBodySize || 0;
+                        existing.duration = resource.duration || null;
+                    }
+                    map.set(key, existing);
+                });
+                return Array.from(map.values());
+            };
+
+            const renderList = (container, items, emptyLabel) => {
+                if (!container) {
+                    return;
+                }
+                container.innerHTML = '';
+                if (!items || !items.length) {
+                    const row = document.createElement('div');
+                    row.className = 'plugency-list-item';
+                    const text = document.createElement('span');
+                    text.className = 'plugency-source';
+                    text.textContent = emptyLabel;
+                    row.appendChild(text);
+                    container.appendChild(row);
+                    return;
+                }
+                items.forEach((item) => {
+                    const row = document.createElement('div');
+                    row.className = 'plugency-list-item plugency-perf-row';
+                    const title = document.createElement('div');
+                    title.className = 'plugency-path';
+                    title.textContent = item.name || item.src || 'Unknown';
+                    row.appendChild(title);
+                    if (item.src) {
+                        const src = document.createElement('span');
+                        src.className = 'plugency-source';
+                        src.textContent = item.src;
+                        row.appendChild(src);
+                    }
+                    const meta = document.createElement('div');
+                    meta.className = 'plugency-accordion-meta';
+                    const parts = [];
+                    if (item.transfer !== null && typeof item.transfer !== 'undefined') {
+                        parts.push(formatBytes(item.transfer));
+                    }
+                    if (item.duration) {
+                        parts.push(formatMs(item.duration));
+                    }
+                    if (item.host) {
+                        parts.push(item.host);
+                    }
+                    meta.textContent = parts.filter(Boolean).join(' | ');
+                    row.appendChild(meta);
+                    const pill = document.createElement('span');
+                    pill.className = 'plugency-pill';
+                    if (item.status === 'loaded') {
+                        pill.classList.add('success');
+                        pill.textContent = 'Loaded';
+                    } else if (item.status === 'not-requested') {
+                        pill.classList.add('warn');
+                        pill.textContent = 'Not requested';
+                    } else {
+                        pill.textContent = 'Inline/unknown';
+                    }
+                    row.appendChild(pill);
+                    container.appendChild(row);
+                });
+            };
+
+            const renderImages = (container, items) => {
+                if (!container) {
+                    return;
+                }
+                container.innerHTML = '';
+                if (!items || !items.length) {
+                    const row = document.createElement('div');
+                    row.className = 'plugency-list-item';
+                    const text = document.createElement('span');
+                    text.className = 'plugency-source';
+                    text.textContent = 'No images found on this view.';
+                    row.appendChild(text);
+                    container.appendChild(row);
+                    return;
+                }
+                items.forEach((img) => {
+                    const row = document.createElement('div');
+                    row.className = 'plugency-list-item plugency-perf-row';
+                    const thumb = document.createElement('img');
+                    thumb.className = 'plugency-thumb';
+                    thumb.src = img.src;
+                    thumb.alt = '';
+                    thumb.loading = 'lazy';
+                    row.appendChild(thumb);
+                    const info = document.createElement('div');
+                    info.className = 'plugency-path';
+                    info.textContent = img.src;
+                    row.appendChild(info);
+                    const meta = document.createElement('div');
+                    meta.className = 'plugency-accordion-meta';
+                    const dims = `${img.renderedWidth || 0}x${img.renderedHeight || 0}px rendered | natural ${img.naturalWidth || 0}x${img.naturalHeight || 0}px`;
+                    const parts = [dims, img.type ? img.type.toUpperCase() : 'Unknown', `${img.count} use${img.count === 1 ? '' : 's'}`];
+                    if (img.transfer) {
+                        parts.push(formatBytes(img.transfer));
+                    }
+                    meta.textContent = parts.filter(Boolean).join(' | ');
+                    row.appendChild(meta);
+                    container.appendChild(row);
+                });
+            };
+
+            const renderMetrics = (container, summary) => {
+                if (!container) {
+                    return;
+                }
+                container.innerHTML = '';
+                const rows = [
+                    { label: 'CSS', value: `${summary.css.count} requests | ${formatBytes(summary.css.transfer)}` },
+                    { label: 'JS', value: `${summary.js.count} requests | ${formatBytes(summary.js.transfer)}` },
+                    { label: 'Images', value: `${summary.img.count} requests | ${formatBytes(summary.img.transfer)}` },
+                    { label: 'Fonts', value: `${summary.font.count} requests | ${formatBytes(summary.font.transfer)}` },
+                    { label: 'External', value: `${summary.externalCount} | ${formatBytes(summary.externalTransfer)}` },
+                    { label: 'Total', value: `${summary.totalCount} | ${formatBytes(summary.totalTransfer)}` },
+                ];
+                rows.forEach((rowData) => {
+                    const row = document.createElement('div');
+                    row.className = 'plugency-list-item plugency-perf-row';
+                    const label = document.createElement('span');
+                    label.className = 'plugency-path';
+                    label.textContent = rowData.label;
+                    const value = document.createElement('span');
+                    value.className = 'plugency-accordion-meta';
+                    value.textContent = rowData.value;
+                    row.appendChild(label);
+                    row.appendChild(value);
+                    container.appendChild(row);
+                });
+            };
+
+            const buildFindings = (styleUsage, scriptUsage, images, summary) => {
+                const findings = [];
+                const unusedStyles = styleUsage.filter((item) => item.status === 'not-requested');
+                const unusedScripts = scriptUsage.filter((item) => item.status === 'not-requested');
+                const heavyImages = images.filter((img) => (img.transfer || 0) > 350000 || img.naturalWidth > 2000 || img.naturalHeight > 2000);
+                if (unusedStyles.length) {
+                    findings.push({ text: `${unusedStyles.length} enqueued styles were not requested on this view.`, tone: 'warn' });
+                }
+                if (unusedScripts.length) {
+                    findings.push({ text: `${unusedScripts.length} enqueued scripts were not requested on this view.`, tone: 'warn' });
+                }
+                if (summary.js.transfer > 750000) {
+                    findings.push({ text: `JavaScript transfer is heavy (${formatBytes(summary.js.transfer)}). Consider deferring or splitting bundles.`, tone: 'warn' });
+                }
+                if (summary.css.transfer > 300000) {
+                    findings.push({ text: `CSS transfer is high (${formatBytes(summary.css.transfer)}). Unused CSS may be blocking render.`, tone: 'warn' });
+                }
+                if (heavyImages.length) {
+                    findings.push({ text: `${heavyImages.length} large image${heavyImages.length === 1 ? '' : 's'} detected. Optimise or lazy-load to improve speed.`, tone: 'error' });
+                }
+                if (summary.externalCount > 6) {
+                    findings.push({ text: `High external request count (${summary.externalCount}). Third-party tags can slow the page.`, tone: 'warn' });
+                }
+                if (!findings.length) {
+                    findings.push({ text: 'No obvious performance issues detected in this view.', tone: 'success' });
+                }
+                return findings;
+            };
+
+            const renderFindings = (items) => {
+                if (!perfOppsList || !perfOppsCount) {
+                    return;
+                }
+                perfOppsList.innerHTML = '';
+                perfOppsCount.textContent = `${items.length} finding${items.length === 1 ? '' : 's'}`;
+                items.forEach((item) => {
+                    const row = document.createElement('div');
+                    row.className = 'plugency-list-item plugency-perf-row';
+                    const text = document.createElement('span');
+                    text.className = 'plugency-source';
+                    text.textContent = item.text;
+                    row.appendChild(text);
+                    const pill = document.createElement('span');
+                    pill.className = 'plugency-pill';
+                    if (item.tone === 'error') {
+                        pill.classList.add('error');
+                        pill.textContent = 'Action';
+                    } else if (item.tone === 'warn') {
+                        pill.classList.add('warn');
+                        pill.textContent = 'Check';
+                    } else {
+                        pill.classList.add('success');
+                        pill.textContent = 'Healthy';
+                    }
+                    row.appendChild(pill);
+                    perfOppsList.appendChild(row);
+                });
+            };
+
+            const renderSummary = (navMetrics, resourceSummary) => {
+                if (perfDom) {
+                    perfDom.textContent = navMetrics.domContentLoaded ? formatMs(navMetrics.domContentLoaded) : 'n/a';
+                }
+                if (perfLoad) {
+                    perfLoad.textContent = navMetrics.load ? formatMs(navMetrics.load) : 'n/a';
+                }
+                if (perfTtfb) {
+                    perfTtfb.textContent = navMetrics.ttfb ? formatMs(navMetrics.ttfb) : 'n/a';
+                }
+                if (perfTransfer) {
+                    const transferVal = navMetrics.transfer || resourceSummary.totalTransfer || 0;
+                    perfTransfer.textContent = formatBytes(transferVal);
+                }
+                if (perfBadge) {
+                    perfBadge.textContent = 'Front-end';
+                }
+                if (perfNote && (!navMetrics.transfer || navMetrics.transfer === 0)) {
+                    perfNote.textContent = 'Metrics may read 0B if served from cache or blocked by the browser.';
+                }
+            };
+
+            const populate = () => {
+                const entries = getResourceEntries();
+                const resourceIndex = buildResourceIndex(entries);
+                const navMetrics = collectNavigationMetrics();
+                const summary = summarizeResources(entries);
+                const styleUsage = mapAssetsToUsage(snapshotData.styles || [], resourceIndex);
+                const scriptUsage = mapAssetsToUsage(snapshotData.scripts || [], resourceIndex);
+                const imageData = collectImages(resourceIndex);
+                renderSummary(navMetrics, summary);
+                renderList(stylesList, styleUsage, 'No styles enqueued on this view.');
+                renderList(scriptsList, scriptUsage, 'No scripts enqueued on this view.');
+                renderImages(imagesList, imageData);
+                renderMetrics(metricsList, summary);
+                if (stylesMeta) {
+                    const loadedStyles = styleUsage.filter((item) => item.status === 'loaded').length;
+                    stylesMeta.textContent = `${loadedStyles}/${styleUsage.length} loaded`;
+                }
+                if (scriptsMeta) {
+                    const loadedScripts = scriptUsage.filter((item) => item.status === 'loaded').length;
+                    scriptsMeta.textContent = `${loadedScripts}/${scriptUsage.length} loaded`;
+                }
+                if (imagesMeta) {
+                    imagesMeta.textContent = `${imageData.length} assets`;
+                }
+                if (metricsMeta) {
+                    metricsMeta.textContent = `${summary.totalCount} requests`;
+                }
+                renderFindings(buildFindings(styleUsage, scriptUsage, imageData, summary));
+            };
+
+            accordionTriggers.forEach((trigger) => {
+                trigger.addEventListener('click', () => {
+                    const item = trigger.closest('.plugency-accordion-item');
+                    if (!item) {
+                        return;
+                    }
+                    const isOpen = item.classList.toggle('open');
+                    trigger.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+                });
+            });
+
+            populate();
+            window.addEventListener('load', () => {
+                setTimeout(populate, 300);
+            });
         };
 
         const replayRequest = () => {
@@ -803,6 +1325,23 @@
                 }
             });
         });
+
+        if (requestMenu && requestMenuToggle) {
+            requestMenuToggle.addEventListener('click', toggleRequestMenu);
+            document.addEventListener('click', (event) => {
+                if (!requestMenu.contains(event.target)) {
+                    closeRequestMenu();
+                }
+            });
+            const requestMenuItems = requestMenu.querySelector('.plugency-menu-items');
+            if (requestMenuItems) {
+                requestMenuItems.querySelectorAll('button').forEach((button) => {
+                    button.addEventListener('click', closeRequestMenu);
+                });
+            }
+        }
+
+        initPerformanceTab();
 
         if (copySnapshotBtn) {
             copySnapshotBtn.addEventListener('click', copySnapshot);

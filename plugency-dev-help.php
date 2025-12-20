@@ -1,4 +1,5 @@
 <?php
+
 /**
  * Plugin Name: Plugency Dev Help
  * Description: Developer-first debugging surface for quick insight into the current request. Shows included PHP files, assets, requests, database queries, and lets you manage debug logging (admin only).
@@ -51,6 +52,8 @@ function plugency_dev_help_enqueue_assets(): void
             'nonce' => wp_create_nonce('plugency_dev_help'),
             'debugLoggingEnabled' => (bool) (defined('WP_DEBUG') && WP_DEBUG),
             'queryLoggingEnabled' => (bool) (defined('SAVEQUERIES') && SAVEQUERIES),
+            'isAdmin' => is_admin(),
+            'isFrontend' => !is_admin(),
         )
     );
 }
@@ -1227,6 +1230,7 @@ function plugency_dev_help_render(): void
     $insights = $snapshot['insights'];
     $hook_insights = isset($snapshot['hooks']['insights']) && is_array($snapshot['hooks']['insights']) ? $snapshot['hooks']['insights'] : array('total' => 0, 'slowest' => array(), 'max' => 0, 'threshold' => 0.05);
     $hook_events = isset($snapshot['hooks']['events']) && is_array($snapshot['hooks']['events']) ? $snapshot['hooks']['events'] : array();
+    $is_frontend = !is_admin();
     $category_order = array('core', 'child-theme', 'parent-theme', 'theme', 'plugin', 'mu-plugin', 'external', 'site', 'other');
     $filter_sources = array();
     foreach (array('files_by_source', 'styles_by_source', 'scripts_by_source') as $bucket) {
@@ -1242,23 +1246,35 @@ function plugency_dev_help_render(): void
             }
         }
     }
-    ?>
-    <div class="plugency-debug-launcher" id="plugencyDebugLauncher" title="Open Plugency Debugger">DBG</div>
+?>
+    <div class="plugency-debug-launcher" id="plugencyDebugLauncher" title="Open Plugency Debugger"><svg width="20" height="20" viewBox="0 0 0.6 0.6" xmlns="http://www.w3.org/2000/svg" fill="#fff">
+            <path d="M.149.2a.3.3 0 0 0-.023.1H.05v.025h.075a.3.3 0 0 0 .015.1H.079L.045.518l.023.009L.096.45h.052c.03.075.087.125.151.125S.42.525.45.45h.052L.53.527.553.518.521.425H.46a.3.3 0 0 0 .015-.1H.55V.3H.474A.3.3 0 0 0 .451.2h.07L.555.107.532.098.504.175H.44A.2.2 0 0 0 .371.097L.434.034.416.016.347.085a.12.12 0 0 0-.095 0L.184.016.166.034l.063.063A.2.2 0 0 0 .16.175H.096L.068.098.045.107.079.2zM.3.1C.361.1.414.155.437.234a.32.32 0 0 0-.274 0C.186.155.239.1.3.1m0 .45A.1.1 0 0 1 .254.539L.3.3l.046.239A.1.1 0 0 1 .3.55M.369.525.317.254H.284L.231.525C.183.487.15.412.15.325A.3.3 0 0 1 .155.266L.164.261a.29.29 0 0 1 .271 0l.009.005A.3.3 0 0 1 .45.325c0 .087-.033.162-.081.2" />
+            <path fill="none" d="M0 0h.6v.6H0z" />
+        </svg></div>
 
     <div class="plugency-debug-panel" id="plugencyDebugPanel" aria-label="Plugency Developer Debugger">
         <div class="plugency-debug-header">
             <div class="plugency-header-left">
-                <button type="button" class="plugency-button ghost icon" data-action="start-inspect" title="Select element to inspect">Inspect</button>
+                <button type="button" class="plugency-button" data-action="start-inspect" title="Select element to inspect"><svg height="16" width="16" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 0.48 0.48" xml:space="preserve" fill="#fff">
+                        <path d="M.296.48.23.394.166.478l-.05-.34.32.144L.328.32l.064.086zM.232.328l.072.096.032-.026L.262.3.328.278.166.206.192.38zM.08.36H0V.28h.04v.04h.04zM.04.24H0V.12h.04zM.36.2H.32V.12h.04zm0-.12H.32V.04H.28V0h.08zm-.32 0H0V0h.08v.04H.04zm.2-.04H.12V0h.12z" />
+                    </svg></button>
                 <div>
                     <h2>Developer Debugger</h2>
                     <p>Focused snapshot of this request. Visible to administrators only.</p>
                 </div>
             </div>
             <div class="plugency-debug-actions">
-                <button type="button" class="plugency-button ghost" data-action="copy-snapshot">Copy JSON Snapshot</button>
-                <button type="button" class="plugency-button ghost" data-action="download-snapshot">Download JSON</button>
-                <button type="button" class="plugency-button ghost icon" data-action="open-filter" title="Filter view">Filter</button>
-                <button type="button" class="plugency-button solid" data-action="close-panel">Close</button>
+                <button type="button" class="plugency-button ghost" data-action="copy-snapshot"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M9.167 7.5h7.5a1.667 1.667 0 0 1 1.666 1.667v7.5a1.667 1.667 0 0 1-1.666 1.666h-7.5A1.667 1.667 0 0 1 7.5 16.667v-7.5A1.667 1.667 0 0 1 9.167 7.5" />
+                        <path d="M4.167 12.5h-.834a1.667 1.667 0 0 1-1.667-1.667v-7.5a1.667 1.667 0 0 1 1.667-1.667h7.5A1.667 1.667 0 0 1 12.5 3.333v.833" />
+                    </svg></button>
+                <button type="button" class="plugency-button ghost" data-action="download-snapshot"><svg width="16" height="16" viewBox="0 0 0.32 0.32" xmlns="http://www.w3.org/2000/svg" fill="#fff">
+                        <path fill-rule="evenodd" d="M.28.18A.02.02 0 0 1 .3.2v.06A.04.04 0 0 1 .26.3h-.2A.04.04 0 0 1 .02.26V.2a.02.02 0 0 1 .04 0v.06h.2V.2A.02.02 0 0 1 .28.18M.16.02a.02.02 0 0 1 .02.02v.092L.206.106a.02.02 0 1 1 .028.028L.16.208.086.134A.02.02 0 0 1 .114.106L.14.132V.04A.02.02 0 0 1 .16.02" />
+                    </svg></button>
+                <button type="button" class="plugency-button ghost" data-action="open-filter" title="Filter view"><svg width="16" height="16" viewBox="-0.04 -0.04 0.48 0.48" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMinYMin" class="jam jam-filter" fill="#fff">
+                        <path d="m.042.04.13.162A.04.04 0 0 1 .18.227V.36L.22.33V.227A.04.04 0 0 1 .229.202L.358.04zm0-.04h.317A.04.04 0 0 1 .39.065L.26.227V.33a.04.04 0 0 1-.016.032l-.04.03A.04.04 0 0 1 .14.36V.227L.01.065A.04.04 0 0 1 .042 0" />
+                    </svg></button>
+                <button type="button" class="plugency-button solid" data-action="close-panel"><svg width="16" height="16" viewBox="0 0 0.32 0.32" xmlns="http://www.w3.org/2000/svg" fill="none"><path fill="#fff" d="M.256.086A.015.015 0 0 0 .235.065L.16.139.086.064a.015.015 0 0 0-.021.021L.139.16.065.234a.015.015 0 1 0 .021.021L.16.181l.074.074A.015.015 0 1 0 .255.234L.181.16z"/></svg></button>
             </div>
         </div>
 
@@ -1273,7 +1289,9 @@ function plugency_dev_help_render(): void
                 </div>
                 <div class="plugency-filter-grid">
                     <?php foreach ($category_order as $category_key) : ?>
-                        <?php if (empty($filter_sources[$category_key])) { continue; } ?>
+                        <?php if (empty($filter_sources[$category_key])) {
+                            continue;
+                        } ?>
                         <div class="plugency-filter-group" data-category="<?php echo esc_attr($category_key); ?>">
                             <div class="plugency-filter-title"><?php echo esc_html(plugency_dev_help_category_label($category_key)); ?></div>
                             <div class="plugency-filter-options">
@@ -1298,6 +1316,9 @@ function plugency_dev_help_render(): void
             <button class="active" data-tab="summary" role="tab" aria-selected="true">Summary</button>
             <button data-tab="files" role="tab" aria-selected="false">PHP Files</button>
             <button data-tab="assets" role="tab" aria-selected="false">Assets</button>
+            <?php if ($is_frontend) : ?>
+                <button data-tab="performance" role="tab" aria-selected="false">Performance</button>
+            <?php endif; ?>
             <button data-tab="requests" role="tab" aria-selected="false">Requests</button>
             <button data-tab="context" role="tab" aria-selected="false">Context</button>
             <button data-tab="database" role="tab" aria-selected="false">Database</button>
@@ -1333,31 +1354,42 @@ function plugency_dev_help_render(): void
                             <li><span>Main query</span><strong><?php echo esc_html($snapshot['summary']['template']['is_main_query']); ?></strong></li>
                         </ul>
                     </div>
-            <div class="plugency-card">
-                    <div class="plugency-card-header">
-                        <h3>Request</h3>
-                        <div class="plugency-inline-actions">
-                            <button class="plugency-button ghost" type="button" data-action="copy-curl">Copy cURL</button>
-                            <button class="plugency-button ghost" type="button" data-action="replay-request">Replay</button>
-                            <label class="plugency-inline-input">
-                                <span>Timeout</span>
-                                <input type="number" min="1" max="120" step="1" value="30" data-role="replay-timeout" aria-label="Replay timeout (seconds)">
-                                <span>s</span>
-                            </label>
-                            <span class="plugency-badge <?php echo is_admin() ? 'warn' : 'neutral'; ?>"><?php echo is_admin() ? 'Admin' : 'Front-end'; ?></span>
+                    <div class="plugency-card">
+                        <div class="plugency-card-header">
+                            <h3>Request</h3>
+                            <div class="plugency-inline-actions">
+                                <span class="plugency-badge <?php echo is_admin() ? 'warn' : 'neutral'; ?>"><?php echo is_admin() ? 'Admin' : 'Front-end'; ?></span>
+                                <div class="plugency-menu" data-role="request-menu">
+                                    <button class="plugency-button ghost plugency-menu-toggle" type="button" data-action="toggle-request-menu" aria-haspopup="true" aria-expanded="false" aria-label="Request actions menu">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="#fff">
+                                            <circle cx="3" cy="8" r="1.25" />
+                                            <circle cx="8" cy="8" r="1.25" />
+                                            <circle cx="13" cy="8" r="1.25" />
+                                        </svg>
+                                    </button>
+                                    <div class="plugency-menu-items">
+                                        <button class="plugency-button ghost" type="button" data-action="copy-curl"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7.334 6h6a1.334 1.334 0 0 1 1.333 1.334v6a1.334 1.334 0 0 1-1.333 1.333h-6A1.334 1.334 0 0 1 6 13.334v-6A1.334 1.334 0 0 1 7.334 6"/><path d="M3.334 10h-.667a1.334 1.334 0 0 1-1.334-1.334v-6a1.334 1.334 0 0 1 1.334-1.334h6A1.334 1.334 0 0 1 10 2.666v.666"/></svg> Copy cURL</button>
+                                        <button class="plugency-button ghost" type="button" data-action="replay-request"><svg width="16" height="16" viewBox="0 0 0.34 0.34" xmlns="http://www.w3.org/2000/svg" fill="#fff"><path d="M.12.16H0V.04h.02v.082a.157.157 0 0 1 .301.006L.302.133A.14.14 0 0 0 .17.032.14.14 0 0 0 .036.14H.12zm.1.02V.2h.084A.14.14 0 0 1 .17.307a.14.14 0 0 1-.132-.1L.019.212A.16.16 0 0 0 .17.327C.239.327.3.281.32.217V.3h.02V.18z"/></svg> Replay Request</button>
+                                        <label class="plugency-inline-input">
+                                            <span>Timeout</span>
+                                            <input type="number" min="1" max="120" step="1" value="30" data-role="replay-timeout" aria-label="Replay timeout (seconds)">
+                                            <span>s</span>
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
-                    </div>
-                <ul class="plugency-meta">
-                    <li><span>URL</span><strong class="plugency-ellipsis" title="<?php echo esc_attr($snapshot['summary']['request']['url']); ?>"><?php echo esc_html($snapshot['summary']['request']['url']); ?></strong></li>
+                        <ul class="plugency-meta">
+                            <li><span>URL</span><strong class="plugency-ellipsis" title="<?php echo esc_attr($snapshot['summary']['request']['url']); ?>"><?php echo esc_html($snapshot['summary']['request']['url']); ?></strong></li>
                             <li><span>Method</span><strong><?php echo esc_html($snapshot['summary']['request']['method']); ?></strong></li>
-                    <li><span>User</span><strong><?php echo esc_html($snapshot['summary']['request']['user']); ?></strong></li>
-                    <li><span>Roles</span><strong class="plugency-ellipsis" title="<?php echo esc_attr($snapshot['summary']['request']['roles']); ?>"><?php echo esc_html($snapshot['summary']['request']['roles']); ?></strong></li>
-                </ul>
-                <div class="plugency-pre compact" id="plugencyReplayOutput">
-                    <pre>Replay results will appear here.</pre>
-                </div>
-                <p id="plugencyReplayStatus" class="plugency-status"></p>
-            </div>
+                            <li><span>User</span><strong><?php echo esc_html($snapshot['summary']['request']['user']); ?></strong></li>
+                            <li><span>Roles</span><strong class="plugency-ellipsis" title="<?php echo esc_attr($snapshot['summary']['request']['roles']); ?>"><?php echo esc_html($snapshot['summary']['request']['roles']); ?></strong></li>
+                        </ul>
+                        <div class="plugency-pre compact" id="plugencyReplayOutput">
+                            <pre>Replay results will appear here.</pre>
+                        </div>
+                        <p id="plugencyReplayStatus" class="plugency-status"></p>
+                    </div>
                     <div class="plugency-card">
                         <div class="plugency-card-header">
                             <h3>PHP</h3>
@@ -1444,19 +1476,21 @@ function plugency_dev_help_render(): void
                     </div>
                     <div id="plugencyIncludedFiles" class="plugency-grouped-list" data-list-scope="files">
                         <?php foreach ($category_order as $category_key) : ?>
-                            <?php if (empty($snapshot['files_by_source'][$category_key])) { continue; } ?>
+                            <?php if (empty($snapshot['files_by_source'][$category_key])) {
+                                continue;
+                            } ?>
                             <div class="plugency-group" data-category="<?php echo esc_attr($category_key); ?>">
                                 <div class="plugency-group-title"><?php echo esc_html(plugency_dev_help_category_label($category_key)); ?></div>
-                                    <?php foreach ($snapshot['files_by_source'][$category_key] as $source => $items) : ?>
-                                        <div class="plugency-group-source"><?php echo esc_html($source); ?></div>
-                                        <div class="plugency-list">
-                                            <?php foreach ($items as $item) : ?>
-                                                <div class="plugency-list-item" data-category="<?php echo esc_attr($category_key); ?>" data-source="<?php echo esc_attr($source); ?>">
-                                                    <span class="plugency-path"><?php echo esc_html($item['path']); ?></span>
-                                                </div>
-                                            <?php endforeach; ?>
-                                        </div>
-                                    <?php endforeach; ?>
+                                <?php foreach ($snapshot['files_by_source'][$category_key] as $source => $items) : ?>
+                                    <div class="plugency-group-source"><?php echo esc_html($source); ?></div>
+                                    <div class="plugency-list">
+                                        <?php foreach ($items as $item) : ?>
+                                            <div class="plugency-list-item" data-category="<?php echo esc_attr($category_key); ?>" data-source="<?php echo esc_attr($source); ?>">
+                                                <span class="plugency-path"><?php echo esc_html($item['path']); ?></span>
+                                            </div>
+                                        <?php endforeach; ?>
+                                    </div>
+                                <?php endforeach; ?>
                             </div>
                         <?php endforeach; ?>
                     </div>
@@ -1472,7 +1506,9 @@ function plugency_dev_help_render(): void
                         </div>
                         <div id="plugencyStyles" class="plugency-grouped-list" data-list-scope="styles">
                             <?php foreach ($category_order as $category_key) : ?>
-                                <?php if (empty($snapshot['styles_by_source'][$category_key])) { continue; } ?>
+                                <?php if (empty($snapshot['styles_by_source'][$category_key])) {
+                                    continue;
+                                } ?>
                                 <div class="plugency-group" data-category="<?php echo esc_attr($category_key); ?>">
                                     <div class="plugency-group-title"><?php echo esc_html(plugency_dev_help_category_label($category_key)); ?></div>
                                     <?php foreach ($snapshot['styles_by_source'][$category_key] as $source => $items) : ?>
@@ -1499,7 +1535,9 @@ function plugency_dev_help_render(): void
                         </div>
                         <div id="plugencyScripts" class="plugency-grouped-list" data-list-scope="scripts">
                             <?php foreach ($category_order as $category_key) : ?>
-                                <?php if (empty($snapshot['scripts_by_source'][$category_key])) { continue; } ?>
+                                <?php if (empty($snapshot['scripts_by_source'][$category_key])) {
+                                    continue;
+                                } ?>
                                 <div class="plugency-group" data-category="<?php echo esc_attr($category_key); ?>">
                                     <div class="plugency-group-title"><?php echo esc_html(plugency_dev_help_category_label($category_key)); ?></div>
                                     <?php foreach ($snapshot['scripts_by_source'][$category_key] as $source => $items) : ?>
@@ -1543,7 +1581,7 @@ function plugency_dev_help_render(): void
                                         Source: <?php echo !empty($asset['source']) ? esc_html($asset['source']) : 'Unknown'; ?> |
                                         Fetch: <?php echo isset($asset['fetch_ms']) ? esc_html(number_format_i18n((float) $asset['fetch_ms'], 1)) . 'ms' : 'n/a'; ?> |
                                         <?php if (!empty($asset['src'])) : ?>
-                                            <span class="plugency-ellipsis" title="<?php echo esc_attr($asset['src']); ?>">URL: <?php echo esc_html($asset['src']); ?></span>
+                                            <span title="<?php echo esc_attr($asset['src']); ?>">URL: <?php echo esc_html($asset['src']); ?></span>
                                         <?php endif; ?>
                                     </div>
                                 </div>
@@ -1554,6 +1592,82 @@ function plugency_dev_help_render(): void
                     </div>
                 </div>
             </div>
+
+            <?php if ($is_frontend) : ?>
+                <div class="plugency-section" data-section="performance">
+                    <div class="plugency-grid two">
+                        <div class="plugency-card">
+                            <div class="plugency-card-header">
+                                <h3>Page Performance</h3>
+                                <span class="plugency-badge neutral" data-role="perf-badge">Front-end</span>
+                            </div>
+                            <p class="plugency-small">Live front-end timings and resource sizes to spot bottlenecks.</p>
+                            <ul class="plugency-meta">
+                                <li><span>DOMContentLoaded</span><strong data-role="perf-dom">Measuring...</strong></li>
+                                <li><span>Load event</span><strong data-role="perf-load">Measuring...</strong></li>
+                                <li><span>TTFB</span><strong data-role="perf-ttfb">Measuring...</strong></li>
+                                <li><span>Transfer</span><strong data-role="perf-transfer">Measuring...</strong></li>
+                            </ul>
+                            <p class="plugency-small" data-role="perf-note">Powered by the browser Performance API; cached responses may show 0 bytes.</p>
+                        </div>
+                        <div class="plugency-card">
+                            <div class="plugency-card-header">
+                                <h3>Findings</h3>
+                                <span class="plugency-badge neutral" data-role="perf-opps-count">Scanning...</span>
+                            </div>
+                            <div class="plugency-list" data-role="perf-opps">
+                                <div class="plugency-list-item">
+                                    <span class="plugency-source">Collecting signals...</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="plugency-card">
+                        <div class="plugency-card-header">
+                            <h3>Resource Analysis</h3>
+                            <span class="plugency-badge neutral">Front-end only</span>
+                        </div>
+                            <div class="plugency-accordion" data-role="perf-accordion">
+                                <div class="plugency-accordion-item open" data-accordion="styles">
+                                    <button class="plugency-accordion-trigger" type="button" aria-expanded="true">
+                                        <span>Styles</span>
+                                        <span class="plugency-accordion-meta" data-role="perf-styles-meta">Loading...</span>
+                                    </button>
+                                    <div class="plugency-accordion-panel">
+                                        <div class="plugency-list" data-role="perf-styles-list"></div>
+                                    </div>
+                                </div>
+                                <div class="plugency-accordion-item" data-accordion="scripts">
+                                    <button class="plugency-accordion-trigger" type="button" aria-expanded="false">
+                                        <span>Scripts</span>
+                                        <span class="plugency-accordion-meta" data-role="perf-scripts-meta">Loading...</span>
+                                    </button>
+                                    <div class="plugency-accordion-panel">
+                                        <div class="plugency-list" data-role="perf-scripts-list"></div>
+                                    </div>
+                                </div>
+                                <div class="plugency-accordion-item" data-accordion="images">
+                                    <button class="plugency-accordion-trigger" type="button" aria-expanded="false">
+                                        <span>Images</span>
+                                        <span class="plugency-accordion-meta" data-role="perf-images-meta">Loading...</span>
+                                    </button>
+                                    <div class="plugency-accordion-panel">
+                                        <div class="plugency-list" data-role="perf-images-list"></div>
+                                    </div>
+                                </div>
+                                <div class="plugency-accordion-item" data-accordion="metrics">
+                                    <button class="plugency-accordion-trigger" type="button" aria-expanded="false">
+                                        <span>Network &amp; cache</span>
+                                        <span class="plugency-accordion-meta" data-role="perf-metrics-meta">Loading...</span>
+                                    </button>
+                                    <div class="plugency-accordion-panel">
+                                        <div class="plugency-list" data-role="perf-metrics-list"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            <?php endif; ?>
 
             <div class="plugency-section" data-section="requests">
                 <div class="plugency-grid two">
@@ -1634,35 +1748,34 @@ function plugency_dev_help_render(): void
             <div class="plugency-section" data-section="database">
                 <div class="plugency-card">
                     <div class="plugency-query-layout">
-                        <div class="plugency-query-nav" data-role="query-tab" role="tablist" aria-label="Database query tabs">
-                            <?php
-                            $query_tabs = array(
-                                'overview' => 'Overview',
-                                'all' => 'All Queries (' . intval($snapshot['query_tables']['counts']['total']) . ')',
-                                'duplicates' => 'Duplicates (' . intval($snapshot['query_tables']['counts']['duplicates']) . ')',
-                                'callers' => 'By Callers (' . intval($snapshot['query_tables']['counts']['callers']) . ')',
-                                'slowest' => 'Slowest (' . count($insights['slowest']) . ')',
-                                'timings' => 'Timings (' . intval($snapshot['query_tables']['counts']['timings']) . ')',
-                            );
-                            $default_query_tab = 'overview';
-                            foreach ($query_tabs as $key => $label) :
-                                $is_active = $key === $default_query_tab;
-                            ?>
-                                <button
-                                    id="plugencyQueryTab-<?php echo esc_attr($key); ?>"
-                                    class="plugency-button ghost <?php echo $is_active ? 'active' : ''; ?>"
-                                    type="button"
-                                    role="tab"
-                                    aria-selected="<?php echo $is_active ? 'true' : 'false'; ?>"
-                                    aria-controls="plugencyQueryPanel-<?php echo esc_attr($key); ?>"
-                                    tabindex="<?php echo $is_active ? '0' : '-1'; ?>"
-                                    data-query-tab="<?php echo esc_attr($key); ?>"
-                                >
-                                    <?php echo esc_html($label); ?>
-                                </button>
-                            <?php endforeach; ?>
-                        </div>
-                        <div class="plugency-query-content" role="presentation">
+                        <div class="plugency-query-nav-wrapper">
+                            <div class="plugency-query-nav" data-role="query-tab" role="tablist" aria-label="Database query tabs">
+                                <?php
+                                $query_tabs = array(
+                                    'overview' => 'Overview',
+                                    'all' => 'All Queries (' . intval($snapshot['query_tables']['counts']['total']) . ')',
+                                    'duplicates' => 'Duplicates (' . intval($snapshot['query_tables']['counts']['duplicates']) . ')',
+                                    'callers' => 'By Callers (' . intval($snapshot['query_tables']['counts']['callers']) . ')',
+                                    'slowest' => 'Slowest (' . count($insights['slowest']) . ')',
+                                    'timings' => 'Timings (' . intval($snapshot['query_tables']['counts']['timings']) . ')',
+                                );
+                                $default_query_tab = 'overview';
+                                foreach ($query_tabs as $key => $label) :
+                                    $is_active = $key === $default_query_tab;
+                                ?>
+                                    <button
+                                        id="plugencyQueryTab-<?php echo esc_attr($key); ?>"
+                                        class="plugency-button ghost <?php echo $is_active ? 'active' : ''; ?>"
+                                        type="button"
+                                        role="tab"
+                                        aria-selected="<?php echo $is_active ? 'true' : 'false'; ?>"
+                                        aria-controls="plugencyQueryPanel-<?php echo esc_attr($key); ?>"
+                                        tabindex="<?php echo $is_active ? '0' : '-1'; ?>"
+                                        data-query-tab="<?php echo esc_attr($key); ?>">
+                                        <?php echo esc_html($label); ?>
+                                    </button>
+                                <?php endforeach; ?>
+                            </div>
                             <div class="plugency-query-actions">
                                 <label class="plugency-switch" data-role="query-view">
                                     <input type="checkbox" data-query-view-toggle>
@@ -1671,6 +1784,9 @@ function plugency_dev_help_render(): void
                                 </label>
                                 <button class="plugency-button ghost" data-action="toggle-query-log"><?php echo defined('SAVEQUERIES') && SAVEQUERIES ? 'Disable Query Logging' : 'Enable Query Logging'; ?></button>
                             </div>
+                        </div>
+                        <div class="plugency-query-content" role="presentation">
+
                             <p class="plugency-hint">SAVEQUERIES <?php echo $snapshot['savequeries_enabled'] ? 'ON' : 'OFF'; ?>. Requires writable wp-config.php to toggle.</p>
                             <p id="queryToggleMsg" class="plugency-status"></p>
                             <div class="plugency-query-panels">
@@ -1722,7 +1838,12 @@ function plugency_dev_help_render(): void
                                     <div class="plugency-table-wrapper plugency-query-view" data-query-view-target="table">
                                         <table class="plugency-table">
                                             <thead>
-                                                <tr><th>#</th><th>Query</th><th>Caller</th><th>Time (s)</th></tr>
+                                                <tr>
+                                                    <th>#</th>
+                                                    <th>Query</th>
+                                                    <th>Caller</th>
+                                                    <th>Time (s)</th>
+                                                </tr>
                                             </thead>
                                             <tbody>
                                                 <?php foreach ($snapshot['query_tables']['table'] as $row) : ?>
@@ -1744,7 +1865,12 @@ function plugency_dev_help_render(): void
                                     <div class="plugency-table-wrapper plugency-query-view" data-query-view-target="table">
                                         <table class="plugency-table">
                                             <thead>
-                                                <tr><th>Count</th><th>Query</th><th>Caller</th><th>Total Time (s)</th></tr>
+                                                <tr>
+                                                    <th>Count</th>
+                                                    <th>Query</th>
+                                                    <th>Caller</th>
+                                                    <th>Total Time (s)</th>
+                                                </tr>
                                             </thead>
                                             <tbody>
                                                 <?php foreach ($snapshot['query_tables']['duplicates'] as $row) : ?>
@@ -1766,7 +1892,11 @@ function plugency_dev_help_render(): void
                                     <div class="plugency-table-wrapper plugency-query-view" data-query-view-target="table">
                                         <table class="plugency-table">
                                             <thead>
-                                                <tr><th>Caller</th><th>Count</th><th>Total Time (s)</th></tr>
+                                                <tr>
+                                                    <th>Caller</th>
+                                                    <th>Count</th>
+                                                    <th>Total Time (s)</th>
+                                                </tr>
                                             </thead>
                                             <tbody>
                                                 <?php foreach ($snapshot['query_tables']['by_caller'] as $row) : ?>
@@ -1787,7 +1917,12 @@ function plugency_dev_help_render(): void
                                     <div class="plugency-table-wrapper plugency-query-view" data-query-view-target="table">
                                         <table class="plugency-table">
                                             <thead>
-                                                <tr><th>#</th><th>Query</th><th>Caller</th><th>Time (s)</th></tr>
+                                                <tr>
+                                                    <th>#</th>
+                                                    <th>Query</th>
+                                                    <th>Caller</th>
+                                                    <th>Time (s)</th>
+                                                </tr>
                                             </thead>
                                             <tbody>
                                                 <?php foreach ($snapshot['query_tables']['timings'] as $index => $row) : ?>
@@ -1809,7 +1944,12 @@ function plugency_dev_help_render(): void
                                     <div class="plugency-table-wrapper plugency-query-view" data-query-view-target="table">
                                         <table class="plugency-table">
                                             <thead>
-                                                <tr><th>#</th><th>Query</th><th>Caller</th><th>Time (s)</th></tr>
+                                                <tr>
+                                                    <th>#</th>
+                                                    <th>Query</th>
+                                                    <th>Caller</th>
+                                                    <th>Time (s)</th>
+                                                </tr>
                                             </thead>
                                             <tbody>
                                                 <?php foreach ($insights['slowest'] as $idx => $row) : ?>
@@ -1824,54 +1964,54 @@ function plugency_dev_help_render(): void
                                         </table>
                                     </div>
                                 </div>
+                            </div>
+                        </div>
                     </div>
-                </div>
-            </div>
                 </div>
             </div>
 
-        <div class="plugency-section" data-section="hooks">
-            <div class="plugency-grid two">
-                <div class="plugency-card">
-                    <div class="plugency-card-header">
-                        <h3>Slowest Hooks (top 20)</h3>
-                        <span class="plugency-badge neutral">Threshold <?php echo esc_html(number_format_i18n($hook_insights['threshold'] * 1000, 0)); ?>ms</span>
-                    </div>
-                    <div class="plugency-timeline">
-                        <?php if (!empty($hook_insights['slowest'])) : ?>
-                            <?php foreach ($hook_insights['slowest'] as $hook) : ?>
-                                <?php
-                                $dur = isset($hook['duration']) ? (float) $hook['duration'] : 0;
-                                $dur_ms = $dur * 1000;
-                                $flag = $dur >= $hook_insights['threshold'];
-                                ?>
-                                <div class="plugency-timeline-item <?php echo $flag ? 'slow' : ''; ?>">
-                                    <div class="plugency-timeline-row">
-                                        <span class="plugency-timeline-tag"><?php echo esc_html($hook['tag']); ?></span>
-                                        <span class="plugency-timeline-meta"><?php echo esc_html(number_format_i18n($dur_ms, 2)); ?>ms</span>
+            <div class="plugency-section" data-section="hooks">
+                <div class="plugency-grid two">
+                    <div class="plugency-card">
+                        <div class="plugency-card-header">
+                            <h3>Slowest Hooks (top 20)</h3>
+                            <span class="plugency-badge neutral">Threshold <?php echo esc_html(number_format_i18n($hook_insights['threshold'] * 1000, 0)); ?>ms</span>
+                        </div>
+                        <div class="plugency-timeline">
+                            <?php if (!empty($hook_insights['slowest'])) : ?>
+                                <?php foreach ($hook_insights['slowest'] as $hook) : ?>
+                                    <?php
+                                    $dur = isset($hook['duration']) ? (float) $hook['duration'] : 0;
+                                    $dur_ms = $dur * 1000;
+                                    $flag = $dur >= $hook_insights['threshold'];
+                                    ?>
+                                    <div class="plugency-timeline-item <?php echo $flag ? 'slow' : ''; ?>">
+                                        <div class="plugency-timeline-row">
+                                            <span class="plugency-timeline-tag"><?php echo esc_html($hook['tag']); ?></span>
+                                            <span class="plugency-timeline-meta"><?php echo esc_html(number_format_i18n($dur_ms, 2)); ?>ms</span>
+                                        </div>
+                                        <div class="plugency-bar" style="width: <?php echo $hook_insights['max'] > 0 ? esc_attr(min(100, ($dur / $hook_insights['max']) * 100)) : 0; ?>%;"></div>
+                                        <div class="plugency-timeline-meta small">
+                                            Memory Δ: <?php echo isset($hook['memory_delta']) ? esc_html(size_format((float) $hook['memory_delta'])) : 'n/a'; ?>
+                                        </div>
                                     </div>
-                                    <div class="plugency-bar" style="width: <?php echo $hook_insights['max'] > 0 ? esc_attr(min(100, ($dur / $hook_insights['max']) * 100)) : 0; ?>%;"></div>
-                                    <div class="plugency-timeline-meta small">
-                                        Memory Δ: <?php echo isset($hook['memory_delta']) ? esc_html(size_format((float) $hook['memory_delta'])) : 'n/a'; ?>
-                                    </div>
-                                </div>
-                            <?php endforeach; ?>
-                        <?php else : ?>
-                            <p class="plugency-small">No hooks recorded. Open this panel as an admin to start capturing.</p>
-                        <?php endif; ?>
+                                <?php endforeach; ?>
+                            <?php else : ?>
+                                <p class="plugency-small">No hooks recorded. Open this panel as an admin to start capturing.</p>
+                            <?php endif; ?>
+                        </div>
                     </div>
-                </div>
-                <div class="plugency-card">
-                    <div class="plugency-card-header">
-                        <h3>Hook Timeline (last <?php echo esc_html(count($hook_events)); ?>)</h3>
-                        <button class="plugency-button ghost" data-action="copy-block" data-target="plugencyHookTimeline">Copy</button>
-                    </div>
-                    <div id="plugencyHookTimeline" class="plugency-pre">
-                        <?php plugency_dev_help_print_pre($hook_events); ?>
+                    <div class="plugency-card">
+                        <div class="plugency-card-header">
+                            <h3>Hook Timeline (last <?php echo esc_html(count($hook_events)); ?>)</h3>
+                            <button class="plugency-button ghost" data-action="copy-block" data-target="plugencyHookTimeline">Copy</button>
+                        </div>
+                        <div id="plugencyHookTimeline" class="plugency-pre">
+                            <?php plugency_dev_help_print_pre($hook_events); ?>
+                        </div>
                     </div>
                 </div>
             </div>
-        </div>
 
             <div class="plugency-section" data-section="logs">
                 <div class="plugency-card">
@@ -1918,7 +2058,9 @@ function plugency_dev_help_render(): void
     <div class="plugency-inspect-tools" data-role="inspect-tools">
         <div class="plugency-inline-actions">
             <span class="plugency-small">Element inspector</span>
-            <button class="plugency-button ghost" data-action="start-inspect">Inspect</button>
+            <button class="plugency-button ghost" data-action="start-inspect"><svg height="16" width="16" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 0.48 0.48" xml:space="preserve" fill="#fff">
+                    <path d="M.296.48.23.394.166.478l-.05-.34.32.144L.328.32l.064.086zM.232.328l.072.096.032-.026L.262.3.328.278.166.206.192.38zM.08.36H0V.28h.04v.04h.04zM.04.24H0V.12h.04zM.36.2H.32V.12h.04zm0-.12H.32V.04H.28V0h.08zm-.32 0H0V0h.08v.04H.04zm.2-.04H.12V0h.12z" />
+                </svg></button>
             <button class="plugency-button ghost" data-action="show-popups">Show</button>
             <button class="plugency-button ghost" data-action="hide-popups">Hide</button>
             <button class="plugency-button ghost" data-action="clear-popups">Clear</button>
@@ -1928,8 +2070,10 @@ function plugency_dev_help_render(): void
         </div>
     </div>
 
-    <script id="plugencyDebugSnapshot" type="application/json"><?php echo wp_json_encode($snapshot, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES); ?></script>
-    <?php
+    <script id="plugencyDebugSnapshot" type="application/json">
+        <?php echo wp_json_encode($snapshot, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES); ?>
+    </script>
+<?php
 }
 
 add_action('wp_footer', 'plugency_dev_help_render');
