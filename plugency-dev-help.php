@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Plugency Dev Help
  * Description: Developer-first debugging surface for quick insight into the current request. Shows included PHP files, assets, requests, database queries, and lets you manage debug logging (admin only).
- * Version: 1.1.0
+ * Version: 1.1.6
  * Author: Raihan Hossain
  */
 
@@ -11,7 +11,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-define('PLUGENCY_DEV_HELP_VERSION', '1.1.0');
+define('PLUGENCY_DEV_HELP_VERSION', '1.1.6');
 
 /**
  * Guard utility to centralize capability checks.
@@ -54,6 +54,8 @@ function plugency_dev_help_enqueue_assets(): void
             'queryLoggingEnabled' => (bool) (defined('SAVEQUERIES') && SAVEQUERIES),
             'isAdmin' => is_admin(),
             'isFrontend' => !is_admin(),
+            'pageId' => function_exists('get_queried_object_id') ? (int) get_queried_object_id() : 0,
+            'homeUrl' => home_url(),
         )
     );
 }
@@ -237,6 +239,36 @@ function plugency_dev_help_classify_path(string $path): array
         'source' => '',
         'path' => $original,
     );
+}
+
+/**
+ * Resolve a local filesystem path from a site URL (best-effort).
+ */
+function plugency_dev_help_resolve_local_path(string $url): array
+{
+    $site_host = wp_parse_url(home_url(), PHP_URL_HOST);
+    $parsed = wp_parse_url($url);
+
+    if (!$parsed || empty($parsed['path'])) {
+        return array('path' => '', 'error' => 'Invalid URL.');
+    }
+
+    $host = isset($parsed['host']) ? $parsed['host'] : $site_host;
+    if ($host && $site_host && strcasecmp((string) $host, (string) $site_host) !== 0) {
+        return array('path' => '', 'error' => 'External URLs are not supported.');
+    }
+
+    $abs = trailingslashit(ABSPATH);
+    $path = wp_normalize_path($abs . ltrim((string) $parsed['path'], '/'));
+    if (strpos($path, wp_normalize_path($abs)) !== 0) {
+        return array('path' => '', 'error' => 'Resolved path is outside WordPress root.');
+    }
+
+    if (!file_exists($path)) {
+        return array('path' => '', 'error' => 'File not found locally.');
+    }
+
+    return array('path' => $path, 'error' => '');
 }
 
 function plugency_dev_help_asset_meta(string $src): array
@@ -1609,6 +1641,11 @@ function plugency_dev_help_render(): void
                                 <li><span>Transfer</span><strong data-role="perf-transfer">Measuring...</strong></li>
                             </ul>
                             <p class="plugency-small" data-role="perf-note">Powered by the browser Performance API; cached responses may show 0 bytes.</p>
+                            <div class="plugency-inline-actions wrap">
+                                <button class="plugency-button ghost" type="button" data-action="copy-perf-report">Copy perf report</button>
+                                <button class="plugency-button ghost" type="button" data-action="purge-page-cache">Purge page cache</button>
+                                <button class="plugency-button ghost" type="button" data-action="toggle-defer-js">Toggle defer JS</button>
+                            </div>
                         </div>
                         <div class="plugency-card">
                             <div class="plugency-card-header">
@@ -1622,15 +1659,157 @@ function plugency_dev_help_render(): void
                             </div>
                         </div>
                     </div>
+                    <div class="plugency-grid two">
+                        <div class="plugency-card">
+                            <div class="plugency-card-header">
+                                <h3>Advanced Signals</h3>
+                                <span class="plugency-badge neutral">Live</span>
+                            </div>
+                            <ul class="plugency-meta">
+                                <li><span>First Paint</span><strong data-role="perf-fp">Measuring...</strong></li>
+                                <li><span>First Contentful Paint</span><strong data-role="perf-fcp">Measuring...</strong></li>
+                                <li><span>Largest Contentful Paint</span><strong data-role="perf-lcp">Measuring...</strong></li>
+                                <li><span>Cumulative Layout Shift</span><strong data-role="perf-cls">Measuring...</strong></li>
+                                <li><span>Main-thread long tasks</span><strong data-role="perf-longtasks">Measuring...</strong></li>
+                                <li><span>DOM size</span><strong data-role="perf-dom-nodes">Measuring...</strong></li>
+                                <li><span>Third-party requests</span><strong data-role="perf-third">Measuring...</strong></li>
+                                <li><span>Largest resource</span><strong data-role="perf-largest">Measuring...</strong></li>
+                            </ul>
+                        </div>
+                        <div class="plugency-card">
+                            <div class="plugency-card-header">
+                                <h3>Slow resources</h3>
+                                <span class="plugency-badge neutral" data-role="perf-slow-count">Scanning...</span>
+                            </div>
+                            <div class="plugency-list" data-role="perf-slow-resources">
+                                <div class="plugency-list-item">
+                                    <span class="plugency-source">Looking for slow requests...</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="plugency-grid two">
+                        <div class="plugency-card">
+                            <div class="plugency-card-header">
+                                <h3>Blocking assets</h3>
+                                <span class="plugency-badge neutral" data-role="perf-blocking-count">Scanning...</span>
+                            </div>
+                            <div class="plugency-list" data-role="perf-blocking-list">
+                                <div class="plugency-list-item">
+                                    <span class="plugency-source">Measuring render-blocking assets...</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="plugency-card">
+                            <div class="plugency-card-header">
+                                <h3>Fonts</h3>
+                                <span class="plugency-badge neutral" data-role="perf-fonts-meta">Scanning...</span>
+                            </div>
+                            <div class="plugency-list" data-role="perf-fonts-list">
+                                <div class="plugency-list-item">
+                                    <span class="plugency-source">Collecting font usage...</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="plugency-grid two">
+                        <div class="plugency-card">
+                            <div class="plugency-card-header">
+                                <h3>Compression & Cache</h3>
+                                <span class="plugency-badge neutral" data-role="perf-cache-meta">Scanning...</span>
+                            </div>
+                            <div class="plugency-list" data-role="perf-cache-list">
+                                <div class="plugency-list-item">
+                                    <span class="plugency-source">Scanning responses...</span>
+                                </div>
+                            </div>
+                        </div>
                     <div class="plugency-card">
                         <div class="plugency-card-header">
-                            <h3>Resource Analysis</h3>
-                            <span class="plugency-badge neutral">Front-end only</span>
+                            <h3>Third-party hosts</h3>
+                            <span class="plugency-badge neutral" data-role="perf-third-meta">Scanning...</span>
                         </div>
-                            <div class="plugency-accordion" data-role="perf-accordion">
-                                <div class="plugency-accordion-item open" data-accordion="styles">
-                                    <button class="plugency-accordion-trigger" type="button" aria-expanded="true">
-                                        <span>Styles</span>
+                        <div class="plugency-list" data-role="perf-third-list">
+                            <div class="plugency-list-item">
+                                <span class="plugency-source">Grouping third-party requests...</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="plugency-card">
+                    <div class="plugency-card-header">
+                        <h3>Heavy JS bundles</h3>
+                        <span class="plugency-badge neutral" data-role="perf-js-meta">Scanning...</span>
+                    </div>
+                    <div class="plugency-list" data-role="perf-js-list">
+                        <div class="plugency-list-item">
+                            <span class="plugency-source">Inspecting scripts...</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="plugency-grid two">
+                    <div class="plugency-card">
+                        <div class="plugency-card-header">
+                            <h3>Lazy-load candidates</h3>
+                            <span class="plugency-badge neutral" data-role="perf-lazy-meta">Scanning...</span>
+                        </div>
+                        <div class="plugency-list" data-role="perf-lazy-list">
+                            <div class="plugency-list-item">
+                                <span class="plugency-source">Looking for below-the-fold images...</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="plugency-card">
+                        <div class="plugency-card-header">
+                            <h3>Connections & Redirects</h3>
+                            <span class="plugency-badge neutral" data-role="perf-conn-meta">Scanning...</span>
+                        </div>
+                        <div class="plugency-list" data-role="perf-conn-list">
+                            <div class="plugency-list-item">
+                                <span class="plugency-source">Evaluating DNS/connect/redirect...</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="plugency-card">
+                    <div class="plugency-card-header">
+                        <h3>Layout risk (CLS)</h3>
+                        <span class="plugency-badge neutral" data-role="perf-cls-meta">Scanning...</span>
+                    </div>
+                    <div class="plugency-list" data-role="perf-cls-list">
+                        <div class="plugency-list-item">
+                            <span class="plugency-source">Looking for un-sized media...</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="plugency-card">
+                    <div class="plugency-card-header">
+                        <h3>Media & Embeds</h3>
+                        <span class="plugency-badge neutral" data-role="perf-embed-meta">Scanning...</span>
+                    </div>
+                    <div class="plugency-list" data-role="perf-embed-list">
+                        <div class="plugency-list-item">
+                            <span class="plugency-source">Scanning iframes/video...</span>
+                        </div>
+                    </div>
+                </div>
+                        <div class="plugency-card">
+                            <div class="plugency-card-header">
+                                <h3>Resource Analysis</h3>
+                                <div class="plugency-inline-actions wrap">
+                                    <span class="plugency-badge neutral">Front-end only</span>
+                                    <button class="plugency-button ghost" type="button" data-action="optimize-all-images">Optimize all images</button>
+                                    <button class="plugency-button ghost" type="button" data-action="preload-key-assets">Preload key assets</button>
+                                    <button class="plugency-button ghost" type="button" data-action="lazyload-images">Add lazyload</button>
+                                    <button class="plugency-button ghost" type="button" data-action="preconnect-hosts">Preconnect third-parties</button>
+                                    <button class="plugency-button ghost" type="button" data-action="lazyload-embeds">Lazyload embeds</button>
+                                    <button class="plugency-button ghost" type="button" data-action="boost-hero-image">Boost hero image</button>
+                                </div>
+                            </div>
+                        <div class="plugency-accordion" data-role="perf-accordion">
+                            <div class="plugency-accordion-item open" data-accordion="styles">
+                                <button class="plugency-accordion-trigger" type="button" aria-expanded="true">
+                                    <span>Styles</span>
                                         <span class="plugency-accordion-meta" data-role="perf-styles-meta">Loading...</span>
                                     </button>
                                     <div class="plugency-accordion-panel">
@@ -1663,13 +1842,61 @@ function plugency_dev_help_render(): void
                                     <div class="plugency-accordion-panel">
                                         <div class="plugency-list" data-role="perf-metrics-list"></div>
                                 </div>
-                            </div>
-                        </div>
                     </div>
                 </div>
-            <?php endif; ?>
+            </div>
+            <div class="plugency-modal-backdrop" data-role="image-optimizer-backdrop"></div>
+            <div class="plugency-modal" data-role="image-optimizer-modal" aria-label="Image optimizer dialog" role="dialog" aria-modal="true">
+                <div class="plugency-modal-header">
+                    <div>
+                        <h3>Image Optimizer</h3>
+                        <p class="plugency-small" data-role="optimizer-summary">Select an image to see estimated savings.</p>
+                    </div>
+                    <button type="button" class="plugency-button ghost" data-action="close-image-optimizer">Close</button>
+                </div>
+                <div class="plugency-modal-body">
+                    <div class="plugency-modal-preview">
+                        <div class="plugency-preview-thumb" data-role="optimizer-thumb"></div>
+                        <div class="plugency-preview-meta">
+                            <p class="plugency-small" data-role="optimizer-meta"></p>
+                            <p class="plugency-small" data-role="optimizer-path"></p>
+                        </div>
+                    </div>
+                    <div class="plugency-modal-options">
+                        <label class="plugency-check">
+                            <input type="checkbox" data-option="resize_to_rendered" checked>
+                            <span>Auto resize to rendered size</span>
+                        </label>
+                        <label class="plugency-check">
+                            <input type="checkbox" data-option="convert_webp" checked>
+                            <span>Convert to WebP</span>
+                        </label>
+                        <label class="plugency-check">
+                            <input type="checkbox" data-option="update_db">
+                            <span>Automatic update in the database</span>
+                        </label>
+                        <label class="plugency-check">
+                            <input type="checkbox" data-option="remove_original">
+                            <span>Remove original after optimization (safe if DB updated)</span>
+                        </label>
+                        <label class="plugency-check">
+                            <input type="checkbox" data-option="lossless">
+                            <span>Lossless optimization (higher quality)</span>
+                        </label>
+                        <p class="plugency-small" data-role="optimizer-estimate"></p>
+                        <div class="plugency-inline-actions wrap">
+                            <button type="button" class="plugency-button solid" data-action="start-image-optimization">Proceed &amp; download</button>
+                            <a class="plugency-button ghost" href="#" target="_blank" rel="noopener" data-role="optimizer-download" style="display:none;">Download optimized bundle</a>
+                        </div>
+                        <p class="plugency-status" data-role="optimizer-status"></p>
+                        <div class="plugency-pre compact" data-role="optimizer-results" style="display:none;"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    <?php endif; ?>
 
-            <div class="plugency-section" data-section="requests">
+    <div class="plugency-section" data-section="requests">
                 <div class="plugency-grid two">
                     <?php
                     $request_sections = array(
@@ -2226,6 +2453,288 @@ function plugency_dev_help_write_test_log_ajax(): void
 }
 
 add_action('wp_ajax_plugency_write_test_log', 'plugency_dev_help_write_test_log_ajax');
+
+/**
+ * Recursively replace URLs in meta values while preserving types/serialization.
+ */
+function plugency_dev_help_replace_value($value, string $old, string $new)
+{
+    if (is_string($value)) {
+        return str_replace($old, $new, $value);
+    }
+    if (is_array($value)) {
+        foreach ($value as $k => $v) {
+            $value[$k] = plugency_dev_help_replace_value($v, $old, $new);
+        }
+        return $value;
+    }
+    return $value;
+}
+
+/**
+ * Replace old image URL with new URL in a given post's content and meta.
+ */
+function plugency_dev_help_update_page_references(int $post_id, string $old_url, string $new_url): array
+{
+    $result = array(
+        'post_id' => $post_id,
+        'content_updated' => false,
+        'meta_updated' => 0,
+        'errors' => array(),
+    );
+
+    $post = get_post($post_id);
+    if (!$post) {
+        $result['errors'][] = 'Post not found.';
+        return $result;
+    }
+
+    // Update content if needed.
+    if (is_string($post->post_content) && strpos($post->post_content, $old_url) !== false) {
+        $updated = str_replace($old_url, $new_url, $post->post_content);
+        $update = wp_update_post(
+            array(
+                'ID' => $post_id,
+                'post_content' => $updated,
+            ),
+            true
+        );
+        if (!is_wp_error($update)) {
+            $result['content_updated'] = true;
+        } else {
+            $result['errors'][] = 'Content update failed: ' . $update->get_error_message();
+        }
+    }
+
+    // Update meta values for this post only.
+    $all_meta = get_post_meta($post_id);
+    foreach ($all_meta as $meta_key => $values) {
+        if (!is_array($values)) {
+            continue;
+        }
+        foreach ($values as $original_value) {
+            $new_value = plugency_dev_help_replace_value($original_value, $old_url, $new_url);
+            if ($new_value === $original_value) {
+                continue;
+            }
+            $updated = update_post_meta($post_id, $meta_key, $new_value, $original_value);
+            if ($updated) {
+                $result['meta_updated']++;
+            } else {
+                $result['errors'][] = sprintf('Meta update failed for %s.', $meta_key);
+            }
+        }
+    }
+
+    return $result;
+}
+
+/**
+ * Optimize a single image and persist results.
+ */
+function plugency_dev_help_optimize_single_image(array $image, array $options, array $upload_dir, int $page_id = 0): array
+{
+    $src = isset($image['src']) ? esc_url_raw((string) $image['src']) : '';
+    $rendered_w = isset($image['rendered_width']) ? (int) $image['rendered_width'] : 0;
+    $rendered_h = isset($image['rendered_height']) ? (int) $image['rendered_height'] : 0;
+
+    $resolved = plugency_dev_help_resolve_local_path($src);
+    if ($resolved['error'] !== '') {
+        return array(
+            'src' => $src,
+            'status' => 'error',
+            'message' => $resolved['error'],
+        );
+    }
+
+    $original_path = $resolved['path'];
+    $original_size = @filesize($original_path);
+    $attachment_id = function_exists('attachment_url_to_postid') ? attachment_url_to_postid($src) : 0;
+
+    $editor = wp_get_image_editor($original_path);
+    if (is_wp_error($editor)) {
+        return array(
+            'src' => $src,
+            'status' => 'error',
+            'message' => $editor->get_error_message(),
+        );
+    }
+
+    $size = $editor->get_size();
+    $target_w = isset($size['width']) ? (int) $size['width'] : 0;
+    $target_h = isset($size['height']) ? (int) $size['height'] : 0;
+    $resize = !empty($options['resize_to_rendered']) && $rendered_w > 0 && $rendered_h > 0;
+    if ($resize && $rendered_w < $target_w && $rendered_h < $target_h) {
+        $target_w = $rendered_w;
+        $target_h = $rendered_h;
+        $editor->resize($target_w, $target_h, false);
+    }
+
+    $convert_webp = !empty($options['convert_webp']);
+    $lossless = !empty($options['lossless']);
+    $quality = $lossless ? 100 : 82;
+    $notes = array();
+    $pathinfo = pathinfo($original_path);
+    $original_ext = isset($pathinfo['extension']) ? strtolower((string) $pathinfo['extension']) : 'jpg';
+    if ($convert_webp && function_exists('wp_image_editor_supports') && !wp_image_editor_supports(array('mime_type' => 'image/webp'))) {
+        $convert_webp = false;
+    }
+    $target_ext = $convert_webp ? 'webp' : $original_ext;
+    $target_mime = $convert_webp ? 'image/webp' : null;
+    if (!$convert_webp && !empty($options['convert_webp'])) {
+        $notes[] = 'WEBP not supported on this server; using original format.';
+    }
+    $optimized_dir = trailingslashit($upload_dir['basedir']) . 'plugency-dev-help/optimized';
+    wp_mkdir_p($optimized_dir);
+    $base_name = isset($pathinfo['filename']) ? $pathinfo['filename'] : 'image';
+    $target_filename = wp_unique_filename($optimized_dir, $base_name . '-plugency-opt.' . $target_ext);
+    $target_path = trailingslashit($optimized_dir) . $target_filename;
+
+    if (method_exists($editor, 'set_quality')) {
+        $editor->set_quality($quality);
+    }
+
+    $saved = $editor->save($target_path, $target_mime);
+    if (is_wp_error($saved)) {
+        return array(
+            'src' => $src,
+            'status' => 'error',
+            'message' => $saved->get_error_message(),
+        );
+    }
+
+    if (isset($saved['path']) && $saved['path'] !== $target_path) {
+        $target_path = $saved['path'];
+    }
+
+    if (file_exists($target_path) && function_exists('wp_update_image_subsizes')) {
+        $editor->set_quality($quality);
+    }
+
+    $optimized_size = @filesize($target_path);
+    $savings = ($original_size && $optimized_size) ? max(0, $original_size - $optimized_size) : null;
+    $updated_db = false;
+    $removed_original = false;
+
+    if (!empty($options['update_db']) && $attachment_id) {
+        require_once ABSPATH . 'wp-admin/includes/image.php';
+        $relative = ltrim(str_replace(trailingslashit($upload_dir['basedir']), '', $target_path), '/');
+        update_post_meta($attachment_id, '_wp_attached_file', $relative);
+        $meta = wp_generate_attachment_metadata($attachment_id, $target_path);
+        if (!is_wp_error($meta)) {
+            wp_update_attachment_metadata($attachment_id, $meta);
+            $updated_db = true;
+        } else {
+            $notes[] = 'Metadata update failed: ' . $meta->get_error_message();
+        }
+    }
+
+    if (!empty($options['remove_original']) && $updated_db) {
+        $uploads_path = wp_normalize_path(trailingslashit($upload_dir['basedir']));
+        $normalized_original = wp_normalize_path($original_path);
+        if (strpos($normalized_original, $uploads_path) === 0 && $normalized_original !== wp_normalize_path($target_path)) {
+            @unlink($original_path);
+            $removed_original = true;
+        } else {
+            $notes[] = 'Original not removed (outside uploads or same as optimized).';
+        }
+    }
+
+    $optimized_url = trailingslashit($upload_dir['baseurl']) . 'plugency-dev-help/optimized/' . $target_filename;
+    $page_updates = array();
+    if (!empty($options['update_db']) && $page_id > 0) {
+        $page_updates = plugency_dev_help_update_page_references($page_id, $src, $optimized_url);
+    } elseif (!empty($options['update_db'])) {
+        $notes[] = 'Page ID missing; database references not updated.';
+    }
+
+    return array(
+        'src' => $src,
+        'status' => 'ok',
+        'message' => 'Optimized',
+        'path' => $target_path,
+        'url' => esc_url_raw($optimized_url),
+        'original_size' => $original_size,
+        'optimized_size' => $optimized_size,
+        'savings' => $savings,
+        'updated_db' => $updated_db,
+        'removed_original' => $removed_original,
+        'notes' => $notes,
+        'page_updates' => $page_updates,
+    );
+}
+
+function plugency_dev_help_optimize_images_ajax(): void
+{
+    plugency_dev_help_verify_ajax();
+
+    if (!class_exists('ZipArchive')) {
+        wp_send_json_error('ZipArchive extension is required for downloads.', 500);
+    }
+
+    $images_raw = isset($_POST['images']) ? wp_unslash((string) $_POST['images']) : '[]';
+    $options_raw = isset($_POST['options']) ? wp_unslash((string) $_POST['options']) : '{}';
+    $images = json_decode($images_raw, true);
+    $options = json_decode($options_raw, true);
+    $page_id = isset($_POST['page_id']) ? absint($_POST['page_id']) : 0;
+
+    if (!is_array($images) || empty($images)) {
+        wp_send_json_error('No images provided for optimization.', 400);
+    }
+
+    $upload_dir = wp_get_upload_dir();
+    $results = array();
+    $optimized_paths = array();
+
+    foreach ($images as $image) {
+        $result = plugency_dev_help_optimize_single_image(is_array($image) ? $image : array(), is_array($options) ? $options : array(), $upload_dir, $page_id);
+        $results[] = $result;
+        if (isset($result['status']) && $result['status'] === 'ok' && !empty($result['path']) && file_exists($result['path'])) {
+            $optimized_paths[] = $result['path'];
+        }
+    }
+
+    $zip_url = '';
+    $zip_size = 0;
+    if (!empty($optimized_paths)) {
+        $zip_dir = trailingslashit($upload_dir['basedir']) . 'plugency-dev-help/optimized';
+        wp_mkdir_p($zip_dir);
+        $zip_name = 'plugency-optimized-' . gmdate('Ymd-His') . '.zip';
+        $zip_path = trailingslashit($zip_dir) . $zip_name;
+        $zip = new ZipArchive();
+        if ($zip->open($zip_path, ZipArchive::CREATE | ZipArchive::OVERWRITE)) {
+            foreach ($optimized_paths as $path) {
+                $zip->addFile($path, basename($path));
+            }
+            $zip->close();
+            $zip_size = @filesize($zip_path);
+            $zip_url = trailingslashit($upload_dir['baseurl']) . 'plugency-dev-help/optimized/' . $zip_name;
+        }
+    }
+
+    wp_send_json_success(
+        array(
+            'results' => $results,
+            'download_url' => $zip_url,
+            'download_size' => $zip_size,
+        )
+    );
+}
+
+add_action('wp_ajax_plugency_optimize_images', 'plugency_dev_help_optimize_images_ajax');
+
+function plugency_dev_help_purge_cache_ajax(): void
+{
+    plugency_dev_help_verify_ajax();
+    /**
+     * Allow integration with cache plugins via custom hooks.
+     * Developers can hook this action to clear their cache.
+     */
+    do_action('plugency_dev_help_purge_cache');
+    wp_send_json_success(array('message' => 'Cache purge signal sent. Integrate via plugency_dev_help_purge_cache.'));
+}
+
+add_action('wp_ajax_plugency_purge_cache', 'plugency_dev_help_purge_cache_ajax');
 
 function plugency_dev_help_replay_request(array $payload): array
 {

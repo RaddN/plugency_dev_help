@@ -1,5 +1,5 @@
 (() => {
-    document.addEventListener('DOMContentLoaded', () => {
+    const init = () => {
         const state = window.plugencyDevHelp || {};
         const launcher = document.getElementById('plugencyDebugLauncher');
         const panel = document.getElementById('plugencyDebugPanel');
@@ -30,18 +30,31 @@
         const requestMenu = panel ? panel.querySelector('[data-role="request-menu"]') : null;
         const requestMenuToggle = panel ? panel.querySelector('[data-action="toggle-request-menu"]') : null;
         const performanceSection = panel ? panel.querySelector('[data-section="performance"]') : null;
+        const optimizerModal = panel ? panel.querySelector('[data-role="image-optimizer-modal"]') : null;
+        const optimizerBackdrop = panel ? panel.querySelector('[data-role="image-optimizer-backdrop"]') : null;
         const closeBtn = panel ? panel.querySelector('[data-action="close-panel"]') : null;
+        const stateHome = state.homeUrl || '';
 
         if (!launcher || !panel) {
             return;
         }
 
         const setStatus = (message, type = 'info') => {
-            if (!statusBar) {
+            if (statusBar) {
+                statusBar.textContent = message;
+                statusBar.className = `plugency-feedback ${type}`;
                 return;
             }
-            statusBar.textContent = message;
-            statusBar.className = `plugency-feedback ${type}`;
+            // Fallback if the inline status bar is not found.
+            console.log(`[Plugency] ${type.toUpperCase()}: ${message}`);
+            try {
+                // Alert only for explicit actions when panel status is missing.
+                if (type === 'error' || type === 'success') {
+                    alert(message);
+                }
+            } catch (e) {
+                /* ignore */
+            }
         };
 
         const extractError = (payload) => {
@@ -106,9 +119,154 @@
             });
         };
 
-        const copyText = (text) => navigator.clipboard.writeText(text)
-            .then(() => setStatus('Copied to clipboard', 'success'))
-            .catch(() => setStatus('Copy failed', 'error'));
+        const markCopied = (btn) => {
+            if (!btn) {
+                return;
+            }
+            const original = btn.dataset.origText || btn.textContent;
+            if (!btn.dataset.origText) {
+                btn.dataset.origText = original;
+            }
+            btn.classList.add('copied');
+            btn.textContent = 'Copied';
+            setTimeout(() => {
+                btn.classList.remove('copied');
+                if (!btn.classList.contains('loading')) {
+                    btn.textContent = btn.dataset.origText || original;
+                }
+            }, 1400);
+        };
+
+        const copyText = (text, sourceBtn = null, successMessage = 'Copied to clipboard') => navigator.clipboard.writeText(text)
+            .then(() => {
+                setStatus(successMessage, 'success');
+                markCopied(sourceBtn);
+            })
+            .catch((err) => {
+                setStatus('Copy failed.', 'error');
+                return Promise.reject(err);
+            });
+
+        const copyHtmlSnippet = (snippet, successMessage, logLabel = 'Snippet', sourceBtn = null) => {
+            if (!snippet) {
+                setStatus('Nothing to copy.', 'error');
+                return;
+            }
+            const copyFallback = () => {
+                const textarea = document.createElement('textarea');
+                textarea.value = snippet;
+                document.body.appendChild(textarea);
+                textarea.select();
+                try {
+                    document.execCommand('copy');
+                    setStatus(successMessage, 'success');
+                    markCopied(sourceBtn);
+                } catch (e) {
+                    setStatus('Copy failed. Snippet logged in console.', 'error');
+                    console.log(`${logLabel}:`, snippet); // safe fallback
+                }
+                textarea.remove();
+            };
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(snippet)
+                    .then(() => {
+                        setStatus(successMessage, 'success');
+                        markCopied(sourceBtn);
+                    })
+                    .catch(copyFallback);
+            } else {
+                copyFallback();
+            }
+        };
+
+        const setLoading = (btn, isLoading, label = 'Working...') => {
+            if (!btn) {
+                return;
+            }
+            if (!btn.dataset.origText) {
+                btn.dataset.origText = btn.textContent;
+            }
+            btn.disabled = !!isLoading;
+            btn.classList.toggle('loading', !!isLoading);
+            if (isLoading) {
+                btn.textContent = label;
+            } else {
+                btn.textContent = btn.dataset.origText || btn.textContent;
+            }
+        };
+
+        let actionModal = null;
+        const getActionModal = () => {
+            if (actionModal) {
+                return actionModal;
+            }
+            const backdrop = document.createElement('div');
+            backdrop.className = 'plugency-modal-backdrop';
+            backdrop.dataset.role = 'action-modal-backdrop';
+            const modal = document.createElement('div');
+            modal.className = 'plugency-modal';
+            modal.dataset.role = 'action-modal';
+            const header = document.createElement('div');
+            header.className = 'plugency-modal-header';
+            const title = document.createElement('h3');
+            const closeBtn = document.createElement('button');
+            closeBtn.type = 'button';
+            closeBtn.className = 'plugency-button ghost';
+            closeBtn.textContent = 'Close';
+            header.appendChild(title);
+            header.appendChild(closeBtn);
+            const body = document.createElement('div');
+            body.className = 'plugency-modal-body';
+            const message = document.createElement('p');
+            message.className = 'plugency-small';
+            const code = document.createElement('pre');
+            code.className = 'plugency-pre';
+            code.style.maxHeight = '180px';
+            code.style.overflow = 'auto';
+            code.style.whiteSpace = 'pre-wrap';
+            const actions = document.createElement('div');
+            actions.className = 'plugency-inline-actions wrap';
+            modal.appendChild(header);
+            modal.appendChild(body);
+            body.appendChild(message);
+            body.appendChild(code);
+            body.appendChild(actions);
+            document.body.appendChild(backdrop);
+            document.body.appendChild(modal);
+            const close = () => {
+                modal.classList.remove('open');
+                backdrop.classList.remove('open');
+            };
+            closeBtn.addEventListener('click', close);
+            backdrop.addEventListener('click', close);
+            actionModal = { modal, backdrop, title, message, code, actions, close };
+            return actionModal;
+        };
+
+        const openActionModal = ({ title, message, code = '', copyLabel = 'Copy snippet', hint = '' }) => {
+            const modalRef = getActionModal();
+            modalRef.title.textContent = title || 'Action required';
+            modalRef.message.textContent = message || '';
+            modalRef.code.textContent = code || '';
+            modalRef.code.style.display = code ? 'block' : 'none';
+            modalRef.actions.innerHTML = '';
+            if (code) {
+                const copyBtn = document.createElement('button');
+                copyBtn.type = 'button';
+                copyBtn.className = 'plugency-button ghost';
+                copyBtn.textContent = copyLabel;
+                copyBtn.addEventListener('click', () => copyHtmlSnippet(code, `${copyLabel} copied.`, copyLabel, copyBtn));
+                modalRef.actions.appendChild(copyBtn);
+            }
+            if (hint) {
+                const hintNode = document.createElement('span');
+                hintNode.className = 'plugency-small';
+                hintNode.textContent = hint;
+                modalRef.actions.appendChild(hintNode);
+            }
+            modalRef.modal.classList.add('open');
+            modalRef.backdrop.classList.add('open');
+        };
 
         let liveTailTimer = null;
         let lastLogData = null;
@@ -135,13 +293,13 @@
             }
         };
 
-        const copyBlock = (targetId) => {
+        const copyBlock = (targetId, sourceBtn = null) => {
             const block = document.getElementById(targetId);
             if (!block) {
                 setStatus('Nothing to copy for this block.', 'error');
                 return;
             }
-            copyText(block.innerText);
+            copyText(block.innerText, sourceBtn, 'Block copied.').catch(() => {});
         };
 
         const copySnapshot = () => {
@@ -149,7 +307,7 @@
                 setStatus('Snapshot not found.', 'error');
                 return;
             }
-            copyText(snapshotNode.textContent.trim());
+            copyText(snapshotNode.textContent.trim(), copySnapshotBtn, 'Snapshot copied.').catch(() => {});
         };
 
         const downloadSnapshot = () => {
@@ -292,8 +450,7 @@
             const params = getLogParams();
             const payload = lastLogData && params.query ? lastLogData.filtered : (lastLogData ? lastLogData.content : null);
             if (payload) {
-                copyText(payload);
-                setStatus('Matches copied.', 'success');
+                copyText(payload, copyMatchesBtn, 'Matches copied.').catch(() => {});
                 return;
             }
             // fetch first if nothing cached
@@ -301,7 +458,7 @@
             setTimeout(() => {
                 if (lastLogData) {
                     const content = params.query ? lastLogData.filtered : lastLogData.content;
-                    copyText(content || '');
+                    copyText(content || '', copyMatchesBtn, 'Matches copied.').catch(() => {});
                 }
             }, 300);
         };
@@ -323,6 +480,12 @@
         }
 
         document.addEventListener('click', (event) => {
+            const actionModalNode = document.querySelector('[data-role="action-modal"]');
+            const actionBackdrop = document.querySelector('[data-role="action-modal-backdrop"]');
+            const inActionModal = (actionModalNode && actionModalNode.contains(event.target)) || (actionBackdrop && actionBackdrop.contains(event.target));
+            if (inActionModal) {
+                return;
+            }
             if (!panel.contains(event.target) && !launcher.contains(event.target)) {
                 closePanel();
             }
@@ -393,7 +556,7 @@
                 setStatus('Unable to build cURL command for this request.', 'error');
                 return;
             }
-            copyText(command);
+            copyText(command, copyCurlBtn, 'cURL command copied.').catch(() => {});
         };
 
         const setReplayMessage = (message, type = 'info') => {
@@ -432,6 +595,42 @@
             const perfNote = performanceSection.querySelector('[data-role="perf-note"]');
             const perfOppsList = performanceSection.querySelector('[data-role="perf-opps"]');
             const perfOppsCount = performanceSection.querySelector('[data-role="perf-opps-count"]');
+            const perfFp = performanceSection.querySelector('[data-role="perf-fp"]');
+            const perfFcp = performanceSection.querySelector('[data-role="perf-fcp"]');
+            const perfLcp = performanceSection.querySelector('[data-role="perf-lcp"]');
+            const perfCls = performanceSection.querySelector('[data-role="perf-cls"]');
+            const perfLongTasks = performanceSection.querySelector('[data-role="perf-longtasks"]');
+            const perfDomNodes = performanceSection.querySelector('[data-role="perf-dom-nodes"]');
+            const perfThird = performanceSection.querySelector('[data-role="perf-third"]');
+            const perfLargest = performanceSection.querySelector('[data-role="perf-largest"]');
+            const perfSlowList = performanceSection.querySelector('[data-role="perf-slow-resources"]');
+            const perfSlowCount = performanceSection.querySelector('[data-role="perf-slow-count"]');
+            const perfBlockingList = performanceSection.querySelector('[data-role="perf-blocking-list"]');
+            const perfBlockingCount = performanceSection.querySelector('[data-role="perf-blocking-count"]');
+            const perfFontsList = performanceSection.querySelector('[data-role="perf-fonts-list"]');
+            const perfFontsMeta = performanceSection.querySelector('[data-role="perf-fonts-meta"]');
+            const perfCacheList = performanceSection.querySelector('[data-role="perf-cache-list"]');
+            const perfCacheMeta = performanceSection.querySelector('[data-role="perf-cache-meta"]');
+            const perfThirdList = performanceSection.querySelector('[data-role="perf-third-list"]');
+            const perfThirdMeta = performanceSection.querySelector('[data-role="perf-third-meta"]');
+            const perfJsList = performanceSection.querySelector('[data-role="perf-js-list"]');
+            const perfJsMeta = performanceSection.querySelector('[data-role="perf-js-meta"]');
+            const perfCopyBtn = performanceSection.querySelector('[data-action="copy-perf-report"]');
+            const perfCacheBtn = performanceSection.querySelector('[data-action="purge-page-cache"]');
+            const perfDeferBtn = performanceSection.querySelector('[data-action="toggle-defer-js"]');
+            const perfClsList = performanceSection.querySelector('[data-role="perf-cls-list"]');
+            const perfClsMeta = performanceSection.querySelector('[data-role="perf-cls-meta"]');
+            const perfEmbedList = performanceSection.querySelector('[data-role="perf-embed-list"]');
+            const perfEmbedMeta = performanceSection.querySelector('[data-role="perf-embed-meta"]');
+            const perfLazyList = performanceSection.querySelector('[data-role="perf-lazy-list"]');
+            const perfLazyMeta = performanceSection.querySelector('[data-role="perf-lazy-meta"]');
+            const perfConnList = performanceSection.querySelector('[data-role="perf-conn-list"]');
+            const perfConnMeta = performanceSection.querySelector('[data-role="perf-conn-meta"]');
+            const perfPreloadBtn = performanceSection.querySelector('[data-action="preload-key-assets"]');
+            const perfLazyBtn = performanceSection.querySelector('[data-action="lazyload-images"]');
+            const perfPreconnectBtn = performanceSection.querySelector('[data-action="preconnect-hosts"]');
+            const perfLazyEmbedsBtn = performanceSection.querySelector('[data-action="lazyload-embeds"]');
+            const perfHeroPriorityBtn = performanceSection.querySelector('[data-action="boost-hero-image"]');
             const stylesList = performanceSection.querySelector('[data-role="perf-styles-list"]');
             const stylesMeta = performanceSection.querySelector('[data-role="perf-styles-meta"]');
             const scriptsList = performanceSection.querySelector('[data-role="perf-scripts-list"]');
@@ -441,6 +640,78 @@
             const metricsList = performanceSection.querySelector('[data-role="perf-metrics-list"]');
             const metricsMeta = performanceSection.querySelector('[data-role="perf-metrics-meta"]');
             const accordionTriggers = performanceSection.querySelectorAll('.plugency-accordion-trigger');
+            const optimizeAllBtn = performanceSection.querySelector('[data-action="optimize-all-images"]');
+            const optimizerThumb = performanceSection.querySelector('[data-role="optimizer-thumb"]');
+            const optimizerMeta = performanceSection.querySelector('[data-role="optimizer-meta"]');
+            const optimizerPath = performanceSection.querySelector('[data-role="optimizer-path"]');
+            const optimizerEstimate = performanceSection.querySelector('[data-role="optimizer-estimate"]');
+            const optimizerSummary = performanceSection.querySelector('[data-role="optimizer-summary"]');
+            const optimizerStatus = performanceSection.querySelector('[data-role="optimizer-status"]');
+            const optimizerResults = performanceSection.querySelector('[data-role="optimizer-results"]');
+            const optimizerDownload = performanceSection.querySelector('[data-role="optimizer-download"]');
+            const optimizerProceed = performanceSection.querySelector('[data-action="start-image-optimization"]');
+            const optimizerClose = performanceSection.querySelector('[data-action="close-image-optimizer"]');
+
+            let collectedImages = [];
+            let selectedImages = [];
+            let lcpEntry = null;
+            let clsValue = 0;
+            let longTaskStats = { count: 0, total: 0 };
+            let paintMetrics = { fp: null, fcp: null };
+            let latestPerfSummary = {};
+
+            if (window.PerformanceObserver) {
+                try {
+                    const lcpObserver = new PerformanceObserver((entryList) => {
+                        const entries = entryList.getEntries();
+                        if (entries && entries.length) {
+                            lcpEntry = entries[entries.length - 1];
+                        }
+                    });
+                    lcpObserver.observe({ type: 'largest-contentful-paint', buffered: true });
+                } catch (e) {
+                    // ignore
+                }
+                try {
+                    const clsObserver = new PerformanceObserver((entryList) => {
+                        entryList.getEntries().forEach((entry) => {
+                            if (!entry.hadRecentInput) {
+                                clsValue += entry.value || 0;
+                            }
+                        });
+                    });
+                    clsObserver.observe({ type: 'layout-shift', buffered: true });
+                } catch (e) {
+                    // ignore
+                }
+                try {
+                    const longObserver = new PerformanceObserver((entryList) => {
+                        entryList.getEntries().forEach((entry) => {
+                            const dur = entry.duration || 0;
+                            if (dur > 0) {
+                                longTaskStats.count += 1;
+                                longTaskStats.total += dur;
+                            }
+                        });
+                    });
+                    longObserver.observe({ entryTypes: ['longtask'] });
+                } catch (e) {
+                    // ignore
+                }
+            }
+
+            const estimateSavingsPct = (img) => {
+                const naturalArea = (img.naturalWidth || 0) * (img.naturalHeight || 0);
+                const renderedArea = (img.renderedWidth || 0) * (img.renderedHeight || 0);
+                let savings = 0;
+                if (naturalArea > 0 && renderedArea > 0 && renderedArea < naturalArea) {
+                    savings = 1 - (renderedArea / naturalArea);
+                }
+                if (img.transfer && img.transfer > 300000) {
+                    savings = Math.max(savings, 0.25);
+                }
+                return Math.min(0.95, Math.max(0, savings));
+            };
 
             const formatMs = (val) => {
                 if (typeof val !== 'number' || Number.isNaN(val) || val < 0) {
@@ -603,6 +874,222 @@
                 return summary;
             };
 
+            const summarizeThirdParty = (entries) => {
+                const host = window.location.host;
+                let count = 0;
+                let transfer = 0;
+                const hosts = {};
+                entries.forEach((entry) => {
+                    if (!entry || !entry.name) {
+                        return;
+                    }
+                    let entryHost = '';
+                    try {
+                        entryHost = new URL(entry.name).host;
+                    } catch (e) {
+                        entryHost = '';
+                    }
+                    if (entryHost && host && entryHost !== host) {
+                        count += 1;
+                        transfer += entry.transferSize || entry.decodedBodySize || entry.encodedBodySize || 0;
+                        if (!hosts[entryHost]) {
+                            hosts[entryHost] = { count: 0, transfer: 0 };
+                        }
+                        hosts[entryHost].count += 1;
+                        hosts[entryHost].transfer += entry.transferSize || entry.decodedBodySize || entry.encodedBodySize || 0;
+                    }
+                });
+                const hostsArr = Object.keys(hosts).map((h) => ({ host: h, count: hosts[h].count, transfer: hosts[h].transfer }));
+                hostsArr.sort((a, b) => b.transfer - a.transfer);
+                return { count, transfer, hosts: hostsArr.slice(0, 6) };
+            };
+
+            const findBlockingAssets = (entries, navMetrics) => {
+                const domTime = navMetrics.domContentLoaded || 0;
+                const blocking = (entries || []).filter((entry) => {
+                    const type = (entry.initiatorType || '').toLowerCase();
+                    if (!['link', 'css', 'style', 'script'].includes(type)) {
+                        return false;
+                    }
+                    const size = entry.transferSize || entry.decodedBodySize || entry.encodedBodySize || 0;
+                    const startedEarly = typeof entry.startTime === 'number' ? entry.startTime <= (domTime || 1500) : true;
+                    return startedEarly && ((entry.duration || 0) > 200 || size > 200000);
+                });
+                blocking.sort((a, b) => (b.duration || 0) - (a.duration || 0));
+                return blocking.slice(0, 8);
+            };
+
+            const getLargestResource = (entries) => {
+                let largest = null;
+                entries.forEach((entry) => {
+                    const size = entry && (entry.transferSize || entry.decodedBodySize || entry.encodedBodySize || 0);
+                    if (!largest || size > largest.size) {
+                        largest = {
+                            name: entry.name || '',
+                            size,
+                            duration: entry.duration || 0,
+                        };
+                    }
+                });
+                return largest;
+            };
+
+            const findSlowResources = (entries) => {
+                const slow = (entries || []).filter((entry) => {
+                    const size = entry.transferSize || entry.decodedBodySize || entry.encodedBodySize || 0;
+                    return (entry.duration && entry.duration > 400) || size > 300000;
+                });
+                slow.sort((a, b) => {
+                    const sizeA = a.transferSize || a.decodedBodySize || a.encodedBodySize || 0;
+                    const sizeB = b.transferSize || b.decodedBodySize || b.encodedBodySize || 0;
+                    const durA = a.duration || 0;
+                    const durB = b.duration || 0;
+                    return (sizeB + durB) - (sizeA + durA);
+                });
+                return slow.slice(0, 8);
+            };
+
+            const collectFonts = (entries) => {
+                const fonts = (entries || []).filter((entry) => {
+                    const name = (entry.name || '').toLowerCase();
+                    return /\.woff2?|\.ttf|\.otf/.test(name) || (entry.initiatorType || '').toLowerCase() === 'font';
+                }).map((entry) => {
+                    const size = entry.transferSize || entry.decodedBodySize || entry.encodedBodySize || 0;
+                    let host = '';
+                    try {
+                        host = new URL(entry.name).host;
+                    } catch (e) {
+                        host = '';
+                    }
+                    return {
+                        name: entry.name || '',
+                        size,
+                        duration: entry.duration || 0,
+                        host,
+                    };
+                });
+                fonts.sort((a, b) => (b.size || 0) - (a.size || 0));
+                return fonts.slice(0, 6);
+            };
+
+            const findHeavyScripts = (entries) => {
+                const heavy = (entries || []).filter((entry) => {
+                    const type = (entry.initiatorType || '').toLowerCase();
+                    if (type !== 'script') {
+                        return false;
+                    }
+                    const size = entry.transferSize || entry.decodedBodySize || entry.encodedBodySize || 0;
+                    return size > 200000 || (entry.duration || 0) > 300;
+                }).map((entry) => ({
+                    name: entry.name || '',
+                    size: entry.transferSize || entry.decodedBodySize || entry.encodedBodySize || 0,
+                    duration: entry.duration || 0,
+                }));
+                heavy.sort((a, b) => (b.size + b.duration) - (a.size + a.duration));
+                return heavy.slice(0, 8);
+            };
+
+            const findUnSizedMedia = () => {
+                const nodes = Array.from(document.querySelectorAll('img, video, iframe')) || [];
+                const risky = [];
+                nodes.forEach((node) => {
+                    const hasDims = node.getAttribute('width') || node.getAttribute('height') || node.style.width || node.style.height;
+                    if (node.tagName.toLowerCase() === 'img') {
+                        if (!hasDims || node.naturalWidth > 0 && node.naturalHeight > 0 && (!node.width || !node.height)) {
+                            risky.push({
+                                tag: 'img',
+                                src: node.currentSrc || node.src || '',
+                                rendered: `${Math.round(node.getBoundingClientRect().width)}x${Math.round(node.getBoundingClientRect().height)}`,
+                                natural: `${node.naturalWidth}x${node.naturalHeight}`,
+                            });
+                        }
+                    } else {
+                        if (!hasDims) {
+                            risky.push({
+                                tag: node.tagName.toLowerCase(),
+                                src: node.src || node.currentSrc || node.getAttribute('src') || '',
+                                rendered: `${Math.round(node.getBoundingClientRect().width)}x${Math.round(node.getBoundingClientRect().height)}`,
+                                natural: '',
+                            });
+                        }
+                    }
+                });
+                return risky.slice(0, 12);
+            };
+
+            const collectEmbeds = () => {
+                const frames = Array.from(document.querySelectorAll('iframe, video')) || [];
+                return frames.slice(0, 12).map((node) => ({
+                    tag: node.tagName.toLowerCase(),
+                    src: node.src || node.currentSrc || node.getAttribute('src') || '',
+                    size: `${Math.round(node.getBoundingClientRect().width)}x${Math.round(node.getBoundingClientRect().height)}`,
+                }));
+            };
+
+            const findLazyCandidates = () => {
+                const images = Array.from(document.querySelectorAll('img')) || [];
+                const threshold = window.innerHeight * 1.5;
+                const candidates = [];
+                images.forEach((img) => {
+                    const rect = img.getBoundingClientRect();
+                    const belowFold = rect.top > threshold;
+                    const loading = (img.getAttribute('loading') || '').toLowerCase();
+                    if (belowFold && loading !== 'lazy') {
+                        candidates.push({
+                            src: img.currentSrc || img.src || '',
+                            position: Math.round(rect.top),
+                            size: `${Math.round(rect.width)}x${Math.round(rect.height)}`,
+                        });
+                    }
+                });
+                return candidates.slice(0, 12);
+            };
+
+            const findConnectionIssues = (entries) => {
+                const slow = [];
+                (entries || []).forEach((entry) => {
+                    const redirect = (entry.redirectEnd || 0) - (entry.redirectStart || 0);
+                    const dns = (entry.domainLookupEnd || 0) - (entry.domainLookupStart || 0);
+                    const connect = (entry.connectEnd || 0) - (entry.connectStart || 0);
+                    if (redirect > 100 || dns > 120 || connect > 120) {
+                        slow.push({
+                            name: entry.name || '',
+                            redirect,
+                            dns,
+                            connect,
+                        });
+                    }
+                });
+                slow.sort((a, b) => ((b.redirect + b.dns + b.connect) - (a.redirect + a.dns + a.connect)));
+                return slow.slice(0, 8);
+            };
+
+            const collectCacheSignals = (entries) => {
+                let uncompressed = 0;
+                let sameOrigin = 0;
+                (entries || []).forEach((entry) => {
+                    if (!entry || !entry.name) {
+                        return;
+                    }
+                    let host = '';
+                    try {
+                        host = new URL(entry.name).host;
+                    } catch (e) {
+                        host = '';
+                    }
+                    if (host && host !== window.location.host) {
+                        return;
+                    }
+                    sameOrigin += 1;
+                    const decoded = entry.decodedBodySize || 0;
+                    const transfer = entry.transferSize || 0;
+                    if (decoded > 1024 && transfer >= decoded * 0.98) {
+                        uncompressed += 1;
+                    }
+                });
+                return { sameOrigin, uncompressed };
+            };
+
             const mapAssetsToUsage = (assets, resourceIndex) => {
                 return (Array.isArray(assets) ? assets : []).map((asset) => {
                     const src = asset && asset.src ? asset.src : '';
@@ -762,8 +1249,76 @@
                     }
                     meta.textContent = parts.filter(Boolean).join(' | ');
                     row.appendChild(meta);
+                    const est = Math.round(estimateSavingsPct(img) * 100);
+                    const actionBar = document.createElement('div');
+                    actionBar.className = 'plugency-inline-actions wrap';
+                    const optBtn = document.createElement('button');
+                    optBtn.className = 'plugency-button ghost';
+                    optBtn.type = 'button';
+                    optBtn.textContent = `Optimize (~${est}% possible)`;
+                    optBtn.addEventListener('click', () => openOptimizer([img]));
+                    actionBar.appendChild(optBtn);
+                    row.appendChild(actionBar);
                     container.appendChild(row);
                 });
+            };
+
+            const populateOptimizer = (images) => {
+                selectedImages = images;
+                if (optimizerResults) {
+                    optimizerResults.style.display = 'none';
+                    optimizerResults.textContent = '';
+                }
+                if (optimizerDownload) {
+                    optimizerDownload.style.display = 'none';
+                    optimizerDownload.href = '#';
+                }
+                if (optimizerStatus) {
+                    optimizerStatus.textContent = 'Ready to optimise ' + images.length + ' image' + (images.length === 1 ? '' : 's') + '.';
+                    optimizerStatus.className = 'plugency-status info';
+                }
+                const first = images[0] || {};
+                if (optimizerThumb) {
+                    optimizerThumb.innerHTML = '';
+                    if (first.src) {
+                        const img = document.createElement('img');
+                        img.src = first.src;
+                        img.alt = '';
+                        img.loading = 'lazy';
+                        optimizerThumb.appendChild(img);
+                    }
+                }
+                if (optimizerMeta) {
+                    const dims = `${first.renderedWidth || 0}×${first.renderedHeight || 0}px rendered • natural ${first.naturalWidth || 0}×${first.naturalHeight || 0}px`;
+                    const sizeText = first.transfer ? ` • transfer ${formatBytes(first.transfer)}` : '';
+                    optimizerMeta.textContent = `${dims}${sizeText}`;
+                }
+                if (optimizerPath) {
+                    optimizerPath.textContent = first.src || '';
+                }
+                if (optimizerEstimate) {
+                    const avg = Math.round((images.reduce((sum, img) => sum + estimateSavingsPct(img), 0) / Math.max(1, images.length)) * 100);
+                    optimizerEstimate.textContent = `Estimated savings: ~${avg}% (based on current render size and transfer).`;
+                }
+            };
+
+            const openOptimizer = (images) => {
+                if (!optimizerModal || !optimizerBackdrop) {
+                    setStatus('Optimizer UI not available.', 'error');
+                    return;
+                }
+                populateOptimizer(images);
+                optimizerModal.classList.add('open');
+                optimizerBackdrop.classList.add('open');
+            };
+
+            const closeOptimizer = () => {
+                if (optimizerModal) {
+                    optimizerModal.classList.remove('open');
+                }
+                if (optimizerBackdrop) {
+                    optimizerBackdrop.classList.remove('open');
+                }
             };
 
             const renderMetrics = (container, summary) => {
@@ -794,7 +1349,7 @@
                 });
             };
 
-            const buildFindings = (styleUsage, scriptUsage, images, summary) => {
+            const buildFindings = (styleUsage, scriptUsage, images, summary, signals = {}) => {
                 const findings = [];
                 const unusedStyles = styleUsage.filter((item) => item.status === 'not-requested');
                 const unusedScripts = scriptUsage.filter((item) => item.status === 'not-requested');
@@ -816,6 +1371,27 @@
                 }
                 if (summary.externalCount > 6) {
                     findings.push({ text: `High external request count (${summary.externalCount}). Third-party tags can slow the page.`, tone: 'warn' });
+                }
+                if (signals.lcp && signals.lcp > 2500) {
+                    findings.push({ text: `Largest Contentful Paint is high (${formatMs(signals.lcp)}). Optimise hero media or reduce render-blocking assets.`, tone: signals.lcp > 4000 ? 'error' : 'warn' });
+                }
+                if (signals.cls && signals.cls > 0.15) {
+                    findings.push({ text: `Layout shift detected (CLS ${signals.cls.toFixed(3)}). Reserve space for images/fonts to avoid movement.`, tone: signals.cls > 0.25 ? 'error' : 'warn' });
+                }
+                if (signals.longTasks && signals.longTasks.total > 600) {
+                    findings.push({ text: `Main thread is busy (${signals.longTasks.count} long tasks totalling ${formatMs(signals.longTasks.total)}). Break up heavy JS or defer non-critical work.`, tone: 'warn' });
+                }
+                if (signals.thirdParty && signals.thirdParty.count > 10) {
+                    findings.push({ text: `Very high third-party usage (${signals.thirdParty.count} requests). Audit tags and SDKs.`, tone: 'warn' });
+                }
+                if (signals.slowResources && signals.slowResources.length > 0) {
+                    findings.push({ text: `${signals.slowResources.length} slow or heavy resources detected. Review caching and compression.`, tone: 'warn' });
+                }
+                if (signals.lazyCandidates && signals.lazyCandidates.length > 0) {
+                    findings.push({ text: `${signals.lazyCandidates.length} images below the fold missing lazyload. Add loading=\"lazy\".`, tone: 'warn' });
+                }
+                if (signals.connIssues && signals.connIssues.length > 0) {
+                    findings.push({ text: `${signals.connIssues.length} requests with slow DNS/connect/redirect. Optimise DNS or reduce redirects.`, tone: 'warn' });
                 }
                 if (!findings.length) {
                     findings.push({ text: 'No obvious performance issues detected in this view.', tone: 'success' });
@@ -875,19 +1451,517 @@
                 }
             };
 
+            const renderAdvancedSignals = (navMetrics, resourceSummary, thirdParty, largest, slowResources) => {
+                if (perfFp || perfFcp) {
+                    if (perfFp) {
+                        perfFp.textContent = paintMetrics.fp ? formatMs(paintMetrics.fp) : 'n/a';
+                    }
+                    if (perfFcp) {
+                        perfFcp.textContent = paintMetrics.fcp ? formatMs(paintMetrics.fcp) : 'n/a';
+                    }
+                }
+                if (perfLcp) {
+                    perfLcp.textContent = lcpEntry ? formatMs(lcpEntry.renderTime || lcpEntry.loadTime || 0) : 'n/a';
+                }
+                if (perfCls) {
+                    perfCls.textContent = clsValue ? clsValue.toFixed(3) : '0.000';
+                }
+                if (perfLongTasks) {
+                    perfLongTasks.textContent = `${longTaskStats.count} (${formatMs(longTaskStats.total)})`;
+                }
+                if (perfDomNodes) {
+                    const domCount = document.getElementsByTagName('*').length;
+                    perfDomNodes.textContent = `${domCount.toLocaleString()} nodes`;
+                }
+                if (perfThird) {
+                    perfThird.textContent = `${thirdParty.count} | ${formatBytes(thirdParty.transfer)}`;
+                }
+                if (perfLargest) {
+                    if (largest) {
+                        perfLargest.textContent = `${formatBytes(largest.size)} @ ${formatMs(largest.duration)} ${largest.name ? ' | ' + largest.name : ''}`;
+                    } else {
+                        perfLargest.textContent = 'n/a';
+                    }
+                }
+                if (perfSlowCount) {
+                    perfSlowCount.textContent = `${slowResources.length} flagged`;
+                }
+            };
+
+            const renderSlowResources = (container, items) => {
+                if (!container) {
+                    return;
+                }
+                container.innerHTML = '';
+                if (!items || !items.length) {
+                    const row = document.createElement('div');
+                    row.className = 'plugency-list-item';
+                    const text = document.createElement('span');
+                    text.className = 'plugency-source';
+                    text.textContent = 'No slow resources detected over 400ms or >300KB.';
+                    row.appendChild(text);
+                    container.appendChild(row);
+                    return;
+                }
+                items.forEach((entry) => {
+                    const row = document.createElement('div');
+                    row.className = 'plugency-list-item plugency-perf-row';
+                    const title = document.createElement('div');
+                    title.className = 'plugency-path';
+                    title.textContent = entry.name || '(unknown)';
+                    row.appendChild(title);
+                    const meta = document.createElement('div');
+                    meta.className = 'plugency-accordion-meta';
+                    const size = entry.transferSize || entry.decodedBodySize || entry.encodedBodySize || 0;
+                    const parts = [formatBytes(size), formatMs(entry.duration || 0)];
+                    meta.textContent = parts.join(' | ');
+                    row.appendChild(meta);
+                    container.appendChild(row);
+                });
+            };
+
+            const renderBlockingAssets = (container, items) => {
+                if (!container) {
+                    return;
+                }
+                container.innerHTML = '';
+                if (!items || !items.length) {
+                    const row = document.createElement('div');
+                    row.className = 'plugency-list-item';
+                    const text = document.createElement('span');
+                    text.className = 'plugency-source';
+                    text.textContent = 'No obvious render-blocking assets over 200ms or 200KB.';
+                    row.appendChild(text);
+                    container.appendChild(row);
+                    return;
+                }
+                items.forEach((entry) => {
+                    const row = document.createElement('div');
+                    row.className = 'plugency-list-item plugency-perf-row';
+                    const title = document.createElement('div');
+                    title.className = 'plugency-path';
+                    title.textContent = entry.name || '(unknown)';
+                    row.appendChild(title);
+                    const meta = document.createElement('div');
+                    meta.className = 'plugency-accordion-meta';
+                    const size = entry.transferSize || entry.decodedBodySize || entry.encodedBodySize || 0;
+                    meta.textContent = `${formatMs(entry.duration || 0)} | ${formatBytes(size)}`;
+                    row.appendChild(meta);
+                    container.appendChild(row);
+                });
+            };
+
+            const renderFonts = (container, fonts) => {
+                if (!container) {
+                    return;
+                }
+                container.innerHTML = '';
+                if (!fonts || !fonts.length) {
+                    const row = document.createElement('div');
+                    row.className = 'plugency-list-item';
+                    const text = document.createElement('span');
+                    text.className = 'plugency-source';
+                    text.textContent = 'No web fonts detected in resource timing.';
+                    row.appendChild(text);
+                    container.appendChild(row);
+                    return;
+                }
+                fonts.forEach((font) => {
+                    const row = document.createElement('div');
+                    row.className = 'plugency-list-item plugency-perf-row';
+                    const title = document.createElement('div');
+                    title.className = 'plugency-path';
+                    title.textContent = font.name || '(font)';
+                    row.appendChild(title);
+                    const meta = document.createElement('div');
+                    meta.className = 'plugency-accordion-meta';
+                    const parts = [formatBytes(font.size), formatMs(font.duration || 0)];
+                    if (font.host) {
+                        parts.push(font.host);
+                    }
+                    meta.textContent = parts.join(' | ');
+                    row.appendChild(meta);
+                    container.appendChild(row);
+                });
+                if (perfFontsMeta) {
+                    perfFontsMeta.textContent = `${fonts.length} font${fonts.length === 1 ? '' : 's'}`;
+                }
+            };
+
+            const renderThirdPartyHosts = (container, data) => {
+                if (!container) {
+                    return;
+                }
+                container.innerHTML = '';
+                const hosts = data && data.hosts ? data.hosts : [];
+                if (!hosts.length) {
+                    const row = document.createElement('div');
+                    row.className = 'plugency-list-item';
+                    const text = document.createElement('span');
+                    text.className = 'plugency-source';
+                    text.textContent = 'No third-party hosts detected.';
+                    row.appendChild(text);
+                    container.appendChild(row);
+                } else {
+                    hosts.forEach((host) => {
+                        const row = document.createElement('div');
+                        row.className = 'plugency-list-item plugency-perf-row';
+                        const title = document.createElement('div');
+                        title.className = 'plugency-path';
+                        title.textContent = host.host;
+                        const meta = document.createElement('div');
+                        meta.className = 'plugency-accordion-meta';
+                        meta.textContent = `${host.count} requests | ${formatBytes(host.transfer)}`;
+                        row.appendChild(title);
+                        row.appendChild(meta);
+                        container.appendChild(row);
+                    });
+                }
+                if (perfThirdMeta) {
+                    perfThirdMeta.textContent = `${(hosts || []).length} host${hosts.length === 1 ? '' : 's'}`;
+                }
+            };
+
+            const renderHeavyScripts = (container, items) => {
+                if (!container) {
+                    return;
+                }
+                container.innerHTML = '';
+                if (!items || !items.length) {
+                    const row = document.createElement('div');
+                    row.className = 'plugency-list-item';
+                    const text = document.createElement('span');
+                    text.className = 'plugency-source';
+                    text.textContent = 'No heavy script bundles found (>200KB or >300ms).';
+                    row.appendChild(text);
+                    container.appendChild(row);
+                    if (perfJsMeta) {
+                        perfJsMeta.textContent = '0 bundles';
+                    }
+                    return;
+                }
+                items.forEach((entry) => {
+                    const row = document.createElement('div');
+                    row.className = 'plugency-list-item plugency-perf-row';
+                    const title = document.createElement('div');
+                    title.className = 'plugency-path';
+                    title.textContent = entry.name || '(script)';
+                    const meta = document.createElement('div');
+                    meta.className = 'plugency-accordion-meta';
+                    meta.textContent = `${formatBytes(entry.size)} | ${formatMs(entry.duration)}`;
+                    row.appendChild(title);
+                    row.appendChild(meta);
+                    container.appendChild(row);
+                });
+                if (perfJsMeta) {
+                    perfJsMeta.textContent = `${items.length} heavy bundle${items.length === 1 ? '' : 's'}`;
+                }
+            };
+
+            const renderUnSizedMedia = (container, items) => {
+                if (!container) {
+                    return;
+                }
+                container.innerHTML = '';
+                if (!items || !items.length) {
+                    const row = document.createElement('div');
+                    row.className = 'plugency-list-item';
+                    const text = document.createElement('span');
+                    text.className = 'plugency-source';
+                    text.textContent = 'No obvious un-sized media found.';
+                    row.appendChild(text);
+                    container.appendChild(row);
+                    if (perfClsMeta) {
+                        perfClsMeta.textContent = '0 risks';
+                    }
+                    return;
+                }
+                items.forEach((item) => {
+                    const row = document.createElement('div');
+                    row.className = 'plugency-list-item plugency-perf-row';
+                    const title = document.createElement('div');
+                    title.className = 'plugency-path';
+                    title.textContent = `${item.tag.toUpperCase()}: ${item.src || '(inline)'}`;
+                    const meta = document.createElement('div');
+                    meta.className = 'plugency-accordion-meta';
+                    meta.textContent = `Rendered ${item.rendered}${item.natural ? ` | Natural ${item.natural}` : ''}`;
+                    row.appendChild(title);
+                    row.appendChild(meta);
+                    container.appendChild(row);
+                });
+                if (perfClsMeta) {
+                    perfClsMeta.textContent = `${items.length} risk${items.length === 1 ? '' : 's'}`;
+                }
+            };
+
+            const renderEmbeds = (container, items) => {
+                if (!container) {
+                    return;
+                }
+                container.innerHTML = '';
+                if (!items || !items.length) {
+                    const row = document.createElement('div');
+                    row.className = 'plugency-list-item';
+                    const text = document.createElement('span');
+                    text.className = 'plugency-source';
+                    text.textContent = 'No iframes or video embeds detected.';
+                    row.appendChild(text);
+                    container.appendChild(row);
+                    if (perfEmbedMeta) {
+                        perfEmbedMeta.textContent = '0 embeds';
+                    }
+                    return;
+                }
+                items.forEach((item) => {
+                    const row = document.createElement('div');
+                    row.className = 'plugency-list-item plugency-perf-row';
+                    const title = document.createElement('div');
+                    title.className = 'plugency-path';
+                    title.textContent = `${item.tag.toUpperCase()}: ${item.src || '(inline)'}`;
+                    const meta = document.createElement('div');
+                    meta.className = 'plugency-accordion-meta';
+                    meta.textContent = `Size ${item.size}`;
+                    row.appendChild(title);
+                    row.appendChild(meta);
+                    container.appendChild(row);
+                });
+                if (perfEmbedMeta) {
+                    perfEmbedMeta.textContent = `${items.length} embed${items.length === 1 ? '' : 's'}`;
+                }
+            };
+
+            const renderLazyCandidates = (container, items) => {
+                if (!container) {
+                    return;
+                }
+                container.innerHTML = '';
+                if (!items || !items.length) {
+                    const row = document.createElement('div');
+                    row.className = 'plugency-list-item';
+                    const text = document.createElement('span');
+                    text.className = 'plugency-source';
+                    text.textContent = 'No obvious below-the-fold images missing loading=\"lazy\".';
+                    row.appendChild(text);
+                    container.appendChild(row);
+                    if (perfLazyMeta) {
+                        perfLazyMeta.textContent = '0 candidates';
+                    }
+                    return;
+                }
+                items.forEach((item) => {
+                    const row = document.createElement('div');
+                    row.className = 'plugency-list-item plugency-perf-row';
+                    const title = document.createElement('div');
+                    title.className = 'plugency-path';
+                    title.textContent = item.src || '(image)';
+                    const meta = document.createElement('div');
+                    meta.className = 'plugency-accordion-meta';
+                    meta.textContent = `Pos ${item.position}px | ${item.size}`;
+                    row.appendChild(title);
+                    row.appendChild(meta);
+                    container.appendChild(row);
+                });
+                if (perfLazyMeta) {
+                    perfLazyMeta.textContent = `${items.length} candidate${items.length === 1 ? '' : 's'}`;
+                }
+            };
+
+            const renderConnectionIssues = (container, items) => {
+                if (!container) {
+                    return;
+                }
+                container.innerHTML = '';
+                if (!items || !items.length) {
+                    const row = document.createElement('div');
+                    row.className = 'plugency-list-item';
+                    const text = document.createElement('span');
+                    text.className = 'plugency-source';
+                    text.textContent = 'No slow redirects/DNS/connects detected.';
+                    row.appendChild(text);
+                    container.appendChild(row);
+                    if (perfConnMeta) {
+                        perfConnMeta.textContent = '0 issues';
+                    }
+                    return;
+                }
+                items.forEach((item) => {
+                    const row = document.createElement('div');
+                    row.className = 'plugency-list-item plugency-perf-row';
+                    const title = document.createElement('div');
+                    title.className = 'plugency-path';
+                    title.textContent = item.name || '(request)';
+                    const meta = document.createElement('div');
+                    meta.className = 'plugency-accordion-meta';
+                    meta.textContent = `Redirect ${formatMs(item.redirect)} | DNS ${formatMs(item.dns)} | Connect ${formatMs(item.connect)}`;
+                    row.appendChild(title);
+                    row.appendChild(meta);
+                    container.appendChild(row);
+                });
+                if (perfConnMeta) {
+                    perfConnMeta.textContent = `${items.length} issue${items.length === 1 ? '' : 's'}`;
+                }
+            };
+
+            const renderCacheSignals = (container, signals) => {
+                if (!container) {
+                    return;
+                }
+                container.innerHTML = '';
+                const { sameOrigin = 0, uncompressed = 0 } = signals || {};
+                const rows = [
+                    { label: 'Same-origin requests inspected', value: sameOrigin },
+                    { label: 'Likely uncompressed', value: uncompressed },
+                ];
+                rows.forEach((rowData) => {
+                    const row = document.createElement('div');
+                    row.className = 'plugency-list-item plugency-perf-row';
+                    const label = document.createElement('span');
+                    label.className = 'plugency-path';
+                    label.textContent = rowData.label;
+                    const value = document.createElement('span');
+                    value.className = 'plugency-accordion-meta';
+                    value.textContent = rowData.value;
+                    row.appendChild(label);
+                    row.appendChild(value);
+                    container.appendChild(row);
+                });
+                if (perfCacheMeta) {
+                    perfCacheMeta.textContent = `${uncompressed} uncompressed`;
+                }
+            };
+
+            const readOptimizerOptions = () => {
+                const opts = {
+                    resize_to_rendered: true,
+                    convert_webp: true,
+                    update_db: false,
+                    remove_original: false,
+                    lossless: false,
+                };
+                optimizerModal?.querySelectorAll('input[data-option]').forEach((input) => {
+                    opts[input.getAttribute('data-option')] = input.checked;
+                });
+                if (opts.remove_original && !opts.update_db) {
+                    opts.remove_original = false;
+                    if (optimizerStatus) {
+                        optimizerStatus.textContent = 'Remove original is disabled unless database update is enabled.';
+                        optimizerStatus.className = 'plugency-status warn';
+                    }
+                }
+                return opts;
+            };
+
+            const normalizeImagePayload = (images) => {
+                return (Array.isArray(images) ? images : []).map((img) => ({
+                    src: img.src || '',
+                    rendered_width: img.renderedWidth || 0,
+                    rendered_height: img.renderedHeight || 0,
+                    natural_width: img.naturalWidth || 0,
+                    natural_height: img.naturalHeight || 0,
+                    transfer: img.transfer || 0,
+                }));
+            };
+
+            const runOptimization = () => {
+                if (!selectedImages.length) {
+                    if (optimizerStatus) {
+                        optimizerStatus.textContent = 'Select at least one image to optimize.';
+                        optimizerStatus.className = 'plugency-status error';
+                    }
+                    return;
+                }
+                const options = readOptimizerOptions();
+                const payload = {
+                    images: JSON.stringify(normalizeImagePayload(selectedImages)),
+                    options: JSON.stringify(options),
+                    page_id: state.pageId || 0,
+                };
+                if (optimizerStatus) {
+                    optimizerStatus.textContent = 'Optimizing images...';
+                    optimizerStatus.className = 'plugency-status info';
+                }
+                post('plugency_optimize_images', payload)
+                    .then((data) => {
+                        if (optimizerStatus) {
+                            optimizerStatus.textContent = 'Optimization finished.';
+                            optimizerStatus.className = 'plugency-status success';
+                        }
+                        if (optimizerResults) {
+                            optimizerResults.style.display = 'block';
+                            optimizerResults.textContent = JSON.stringify(data.results || [], null, 2);
+                        }
+                        if (optimizerDownload && data.download_url) {
+                            optimizerDownload.href = data.download_url;
+                            optimizerDownload.style.display = 'inline-flex';
+                            optimizerDownload.textContent = data.download_size ? `Download bundle (${formatBytes(data.download_size)})` : 'Download bundle';
+                        }
+                        setStatus('Optimized images ready to download.', 'success');
+                    })
+                    .catch((error) => {
+                        if (optimizerStatus) {
+                            optimizerStatus.textContent = error.message;
+                            optimizerStatus.className = 'plugency-status error';
+                        }
+                        setStatus(error.message, 'error');
+                    });
+            };
+
             const populate = () => {
                 const entries = getResourceEntries();
                 const resourceIndex = buildResourceIndex(entries);
                 const navMetrics = collectNavigationMetrics();
                 const summary = summarizeResources(entries);
+                const blockingAssets = findBlockingAssets(entries, navMetrics);
                 const styleUsage = mapAssetsToUsage(snapshotData.styles || [], resourceIndex);
                 const scriptUsage = mapAssetsToUsage(snapshotData.scripts || [], resourceIndex);
                 const imageData = collectImages(resourceIndex);
+                const thirdParty = summarizeThirdParty(entries);
+                const largest = getLargestResource(entries);
+                const slowResources = findSlowResources(entries);
+                const fonts = collectFonts(entries);
+                const cacheSignals = collectCacheSignals(entries);
+                const paints = performance.getEntriesByType && performance.getEntriesByType('paint') || [];
+                paints.forEach((entry) => {
+                    if (entry.name === 'first-paint') {
+                        paintMetrics.fp = entry.startTime || entry.duration || null;
+                    } else if (entry.name === 'first-contentful-paint') {
+                        paintMetrics.fcp = entry.startTime || entry.duration || null;
+                    }
+                });
+                const heavyScripts = findHeavyScripts(entries);
+                const unsizedMedia = findUnSizedMedia();
+                const embeds = collectEmbeds();
+                const lazyCandidates = findLazyCandidates();
+                const connIssues = findConnectionIssues(entries);
+                collectedImages = imageData;
                 renderSummary(navMetrics, summary);
+                renderAdvancedSignals(navMetrics, summary, thirdParty, largest, slowResources);
                 renderList(stylesList, styleUsage, 'No styles enqueued on this view.');
                 renderList(scriptsList, scriptUsage, 'No scripts enqueued on this view.');
                 renderImages(imagesList, imageData);
                 renderMetrics(metricsList, summary);
+                renderSlowResources(perfSlowList, slowResources);
+                renderBlockingAssets(perfBlockingList, blockingAssets);
+                renderFonts(perfFontsList, fonts);
+                renderCacheSignals(perfCacheList, cacheSignals);
+                renderThirdPartyHosts(perfThirdList, thirdParty);
+                renderHeavyScripts(perfJsList, heavyScripts);
+                renderUnSizedMedia(perfClsList, unsizedMedia);
+                renderEmbeds(perfEmbedList, embeds);
+                renderLazyCandidates(perfLazyList, lazyCandidates);
+                renderConnectionIssues(perfConnList, connIssues);
+                if (perfBlockingCount) {
+                    perfBlockingCount.textContent = `${blockingAssets.length} blocking`;
+                }
+                if (perfSlowCount) {
+                    perfSlowCount.textContent = `${slowResources.length} flagged`;
+                }
+                if (perfCacheMeta) {
+                    perfCacheMeta.textContent = `${cacheSignals.uncompressed || 0} uncompressed`;
+                }
+                if (perfThirdMeta) {
+                    perfThirdMeta.textContent = `${thirdParty.hosts ? thirdParty.hosts.length : 0} host${thirdParty.hosts && thirdParty.hosts.length === 1 ? '' : 's'}`;
+                }
                 if (stylesMeta) {
                     const loadedStyles = styleUsage.filter((item) => item.status === 'loaded').length;
                     stylesMeta.textContent = `${loadedStyles}/${styleUsage.length} loaded`;
@@ -902,7 +1976,39 @@
                 if (metricsMeta) {
                     metricsMeta.textContent = `${summary.totalCount} requests`;
                 }
-                renderFindings(buildFindings(styleUsage, scriptUsage, imageData, summary));
+                const findings = buildFindings(styleUsage, scriptUsage, imageData, summary, {
+                    lcp: lcpEntry ? (lcpEntry.renderTime || lcpEntry.loadTime || 0) : null,
+                    cls: clsValue,
+                    longTasks: longTaskStats,
+                    thirdParty,
+                    slowResources,
+                    blockingAssets,
+                    uncompressed: cacheSignals.uncompressed,
+                    unsizedMedia,
+                    heavyScripts,
+                    embeds,
+                    lazyCandidates,
+                    connIssues,
+                });
+                renderFindings(findings);
+                latestPerfSummary = {
+                    navMetrics,
+                    summary,
+                    thirdParty,
+                    slowResources,
+                    blockingAssets,
+                    cacheSignals,
+                    fonts,
+                    heavyScripts,
+                    unsizedMedia,
+                    embeds,
+                    lazyCandidates,
+                    connIssues,
+                    paints: paintMetrics,
+                    lcp: lcpEntry ? (lcpEntry.renderTime || lcpEntry.loadTime || 0) : null,
+                    cls: clsValue,
+                    longTasks: longTaskStats,
+                };
             };
 
             accordionTriggers.forEach((trigger) => {
@@ -920,6 +2026,241 @@
             window.addEventListener('load', () => {
                 setTimeout(populate, 300);
             });
+
+            if (optimizeAllBtn) {
+                optimizeAllBtn.addEventListener('click', () => {
+                    if (!collectedImages.length) {
+                        setStatus('No images detected to optimize.', 'error');
+                        return;
+                    }
+                    openOptimizer(collectedImages);
+                });
+            }
+
+            if (perfCopyBtn) {
+                perfCopyBtn.addEventListener('click', () => {
+                    setLoading(perfCopyBtn, true, 'Copying...');
+                    const report = {
+                        ...latestPerfSummary,
+                        timestamp: new Date().toISOString(),
+                        url: window.location.href,
+                    };
+                    const pretty = JSON.stringify(report, null, 2);
+                    copyText(pretty, perfCopyBtn, 'Performance report copied.')
+                        .then(() => {
+                            openActionModal({
+                                title: 'Performance report copied',
+                                message: 'Paste this JSON into your bug report or performance ticket.',
+                                code: pretty,
+                                copyLabel: 'Copy report again',
+                                hint: report.url || '',
+                            });
+                        })
+                        .catch(() => {
+                            /* handled in copyText */
+                        })
+                        .finally(() => setLoading(perfCopyBtn, false));
+                });
+            }
+
+            if (perfCacheBtn) {
+                perfCacheBtn.addEventListener('click', () => {
+                    setLoading(perfCacheBtn, true, 'Sending...');
+                    setStatus('Sending cache purge request...', 'info');
+                    post('plugency_purge_cache', {})
+                        .then((data) => {
+                            const msg = data && data.message ? data.message : 'Cache purge signal sent.';
+                            openActionModal({
+                                title: 'Cache purge sent',
+                                message: msg,
+                                code: '',
+                                hint: 'If your cache plugin needs extra setup, hook into plugency_dev_help_purge_cache.',
+                            });
+                            setStatus(msg, 'success');
+                        })
+                        .catch((error) => setStatus(error.message, 'error'))
+                        .finally(() => setLoading(perfCacheBtn, false));
+                });
+            }
+
+            if (perfDeferBtn) {
+                perfDeferBtn.addEventListener('click', () => {
+                    setLoading(perfDeferBtn, true, 'Scanning...');
+                    const scripts = Array.from(document.querySelectorAll('script[src]')) || [];
+                    const sameHost = scripts.filter((s) => {
+                        try {
+                            return new URL(s.src, window.location.href).host === window.location.host;
+                        } catch (e) {
+                            return false;
+                        }
+                    }).map((s) => s.src);
+                    const sample = sameHost.slice(0, 10);
+                    const note = sample.length ? `Example candidates to defer: ${sample.join(', ')}` : 'No same-origin scripts found.';
+                    const snippet = sample.map((src) => `<script src=\"${src}\" defer></script>`).join('\n');
+                    openActionModal({
+                        title: 'Defer JS suggestion',
+                        message: 'Add defer to non-critical scripts to improve render. Apply to these candidates:',
+                        code: snippet || '<script src="app.js" defer></script>',
+                        copyLabel: 'Copy defer examples',
+                        hint: note,
+                    });
+                    setStatus(`Defer suggestion: mark non-critical scripts with defer. ${note}`, 'info');
+                    setLoading(perfDeferBtn, false);
+                });
+            }
+
+            if (perfPreloadBtn) {
+                perfPreloadBtn.addEventListener('click', () => {
+                    setLoading(perfPreloadBtn, true, 'Building...');
+                    setStatus('Building preload snippet...', 'info');
+                    const links = [];
+                    const heroImg = collectedImages && collectedImages[0] ? collectedImages[0].src : '';
+                    if (heroImg) {
+                        links.push(`<link rel=\"preload\" as=\"image\" href=\"${heroImg}\">`);
+                    }
+                    const css = (snapshotData.styles || []).slice(0, 3).map((s) => s.src).filter(Boolean);
+                    css.forEach((href) => links.push(`<link rel=\"preload\" as=\"style\" href=\"${href}\">`));
+                    if (links.length === 0) {
+                        setStatus('No preload candidates detected.', 'error');
+                        return;
+                    }
+                    const snippet = links.join('\n');
+                    openActionModal({
+                        title: 'Preload key assets',
+                        message: 'Add this snippet to your <head> to preload the hero image and top CSS. Copy and paste into your theme or head injection tool.',
+                        code: snippet,
+                        copyLabel: 'Copy preload snippet',
+                        hint: 'Place before render-blocking assets for best impact.',
+                    });
+                    setStatus('Preload snippet ready.', 'success');
+                    setLoading(perfPreloadBtn, false);
+                });
+            }
+
+            if (perfPreconnectBtn) {
+                perfPreconnectBtn.addEventListener('click', () => {
+                    setLoading(perfPreconnectBtn, true, 'Building...');
+                    setStatus('Building preconnect snippet...', 'info');
+                    const hosts = latestPerfSummary && latestPerfSummary.thirdParty && Array.isArray(latestPerfSummary.thirdParty.hosts)
+                        ? latestPerfSummary.thirdParty.hosts
+                        : [];
+                    if (!hosts.length) {
+                        setStatus('No third-party hosts detected to preconnect.', 'error');
+                        setLoading(perfPreconnectBtn, false);
+                        return;
+                    }
+                    const snippet = hosts.slice(0, 6).map((item) => {
+                        const host = item.host || item;
+                        return `<link rel=\"preconnect\" href=\"https://${host}\" crossorigin>\n<link rel=\"dns-prefetch\" href=\"//${host}\">`;
+                    }).join('\n');
+                    openActionModal({
+                        title: 'Preconnect third-parties',
+                        message: 'Add this snippet to your <head> so DNS/TLS handshakes start earlier for heavy third-party hosts.',
+                        code: snippet,
+                        copyLabel: 'Copy preconnect snippet',
+                        hint: 'Place before external scripts such as analytics/ads.',
+                    });
+                    setStatus('Preconnect snippet ready.', 'success');
+                    setLoading(perfPreconnectBtn, false);
+                });
+            }
+
+            if (perfLazyBtn) {
+                perfLazyBtn.addEventListener('click', () => {
+                    setLoading(perfLazyBtn, true, 'Applying...');
+                    setStatus('Applying loading=\"lazy\" to below-the-fold images...', 'info');
+                    const imgs = Array.from(document.querySelectorAll('img')) || [];
+                    let updated = 0;
+                    imgs.forEach((img) => {
+                        const rect = img.getBoundingClientRect();
+                        if (rect.top > window.innerHeight * 1.2 && !img.getAttribute('loading')) {
+                            img.setAttribute('loading', 'lazy');
+                            updated += 1;
+                        }
+                    });
+                    const msg = updated ? `Applied loading=\"lazy\" to ${updated} images (preview only).` : 'No new lazyload targets found.';
+                    setStatus(msg, updated ? 'success' : 'info');
+                    openActionModal({
+                        title: 'Lazyload images',
+                        message: updated ? `${updated} image${updated === 1 ? '' : 's'} marked with loading="lazy" in this view. Save these changes in your templates/theme for production.` : 'No new below-the-fold images were found without lazyload.',
+                        code: updated ? '<img loading="lazy" ...>' : '',
+                        copyLabel: 'Copy lazy attribute sample',
+                        hint: updated ? 'Replicate loading="lazy" on below-the-fold images server-side.' : '',
+                    });
+                    setLoading(perfLazyBtn, false);
+                });
+            }
+
+            if (perfLazyEmbedsBtn) {
+                perfLazyEmbedsBtn.addEventListener('click', () => {
+                    setLoading(perfLazyEmbedsBtn, true, 'Applying...');
+                    setStatus('Applying lazyload to embeds...', 'info');
+                    const threshold = window.innerHeight * 1.2;
+                    let updated = 0;
+                    const frames = Array.from(document.querySelectorAll('iframe')) || [];
+                    frames.forEach((frame) => {
+                        const rect = frame.getBoundingClientRect();
+                        if (rect.top > threshold && !frame.getAttribute('loading')) {
+                            frame.setAttribute('loading', 'lazy');
+                            updated += 1;
+                        }
+                    });
+                    const msg = updated ? `Applied lazyload to ${updated} embed${updated === 1 ? '' : 's'} (preview only).` : 'No embed targets found.';
+                    setStatus(msg, updated ? 'success' : 'info');
+                    openActionModal({
+                        title: 'Lazyload embeds',
+                        message: msg + ' Add loading="lazy" to iframes/videos below the fold in your templates.',
+                        code: updated ? '<iframe loading="lazy" ...></iframe>' : '',
+                        copyLabel: 'Copy iframe lazy example',
+                        hint: 'Add server-side to persist.',
+                    });
+                    setLoading(perfLazyEmbedsBtn, false);
+                });
+            }
+
+            if (perfHeroPriorityBtn) {
+                perfHeroPriorityBtn.addEventListener('click', () => {
+                    setLoading(perfHeroPriorityBtn, true, 'Marking...');
+                    const hero = (() => {
+                        if (lcpEntry && lcpEntry.element && lcpEntry.element.tagName && lcpEntry.element.tagName.toLowerCase() === 'img') {
+                            return lcpEntry.element;
+                        }
+                        const images = Array.from(document.querySelectorAll('img')) || [];
+                        const threshold = window.innerHeight * 1.2;
+                        return images.find((img) => {
+                            const rect = img.getBoundingClientRect();
+                            return rect.top >= 0 && rect.top < threshold;
+                        });
+                    })();
+                    if (!hero) {
+                        setStatus('No hero image found to prioritize.', 'error');
+                        setLoading(perfHeroPriorityBtn, false);
+                        return;
+                    }
+                    hero.setAttribute('fetchpriority', 'high');
+                    hero.setAttribute('decoding', 'async');
+                    const src = hero.currentSrc || hero.src || '(image)';
+                    setStatus(`Marked hero image as high priority (${src}).`, 'success');
+                    openActionModal({
+                        title: 'Hero image prioritised',
+                        message: 'The hero image was marked with fetchpriority="high" and decoding="async" in this preview. Apply this to your template for permanent effect.',
+                        code: '<img fetchpriority="high" decoding="async" ...>',
+                        copyLabel: 'Copy hero attributes',
+                        hint: src,
+                    });
+                    setLoading(perfHeroPriorityBtn, false);
+                });
+            }
+
+            if (optimizerClose) {
+                optimizerClose.addEventListener('click', closeOptimizer);
+            }
+            if (optimizerBackdrop) {
+                optimizerBackdrop.addEventListener('click', closeOptimizer);
+            }
+            if (optimizerProceed) {
+                optimizerProceed.addEventListener('click', runOptimization);
+            }
         };
 
         const replayRequest = () => {
@@ -1180,9 +2521,7 @@
             copyBtn.title = 'Copy selector';
             copyBtn.addEventListener('click', () => {
                 if (info.selector) {
-                    navigator.clipboard.writeText(info.selector)
-                        .then(() => setStatus('Selector copied', 'success'))
-                        .catch(() => setStatus('Copy failed', 'error'));
+                    copyText(info.selector, copyBtn, 'Selector copied.').catch(() => {});
                 }
             });
             title.appendChild(titleText);
@@ -1321,7 +2660,7 @@
             button.addEventListener('click', () => {
                 const target = button.getAttribute('data-target');
                 if (target) {
-                    copyBlock(target);
+                    copyBlock(target, button);
                 }
             });
         });
@@ -1465,5 +2804,11 @@
                 setQueryView(view);
             });
         }
-    });
+    };
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init);
+    } else {
+        init();
+    }
 })();
