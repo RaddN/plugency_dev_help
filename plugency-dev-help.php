@@ -21,6 +21,810 @@ function plugency_dev_help_can_view(): bool
     return is_user_logged_in() && current_user_can('manage_options');
 }
 
+function plugency_dev_help_default_budgets(): array
+{
+    return array(
+        'lcp_ms' => 2500,
+        'fid_ms' => 100,
+        'cls' => 0.1,
+        'weight_kb' => 1800,
+        'requests' => 120,
+    );
+}
+
+function plugency_dev_help_get_budgets(): array
+{
+    $defaults = plugency_dev_help_default_budgets();
+    $saved = get_option('plugency_dev_help_perf_budgets', array());
+    if (!is_array($saved)) {
+        $saved = array();
+    }
+    $budget = array();
+    foreach ($defaults as $key => $value) {
+        $val = isset($saved[$key]) ? $saved[$key] : $value;
+        if (in_array($key, array('lcp_ms', 'fid_ms', 'weight_kb', 'requests'), true)) {
+            $val = max(0, (int) $val);
+        } elseif ($key === 'cls') {
+            $val = max(0, (float) $val);
+        }
+        $budget[$key] = $val;
+    }
+    return $budget;
+}
+
+function plugency_dev_help_save_budgets(array $input): array
+{
+    $current = plugency_dev_help_default_budgets();
+    foreach ($current as $key => $default) {
+        if (!isset($input[$key])) {
+            continue;
+        }
+        if (in_array($key, array('lcp_ms', 'fid_ms', 'weight_kb', 'requests'), true)) {
+            $current[$key] = max(0, (int) $input[$key]);
+        } elseif ($key === 'cls') {
+            $current[$key] = max(0, (float) $input[$key]);
+        }
+    }
+    update_option('plugency_dev_help_perf_budgets', $current, false);
+    return $current;
+}
+
+function plugency_dev_help_default_perf_tests(): array
+{
+    return array(
+        'history' => array(),
+        'schedules' => array(),
+        'alerts' => array(),
+        'webhook' => '',
+    );
+}
+
+function plugency_dev_help_normalize_perf_result(array $result): array
+{
+    $metrics = isset($result['metrics']) && is_array($result['metrics']) ? $result['metrics'] : array();
+    $safe_metrics = array();
+    foreach (array('lcp_ms', 'cls', 'fid_ms', 'ttfb_ms', 'fcp_ms', 'fp_ms', 'weight_kb', 'requests') as $key) {
+        if (!isset($metrics[$key])) {
+            $safe_metrics[$key] = null;
+            continue;
+        }
+        if ($key === 'cls') {
+            $safe_metrics[$key] = (float) $metrics[$key];
+        } else {
+            $safe_metrics[$key] = is_numeric($metrics[$key]) ? (float) $metrics[$key] : null;
+        }
+    }
+
+    return array(
+        'id' => isset($result['id']) ? sanitize_text_field((string) $result['id']) : uniqid('perf_', true),
+        'ts' => isset($result['ts']) ? (int) $result['ts'] : time(),
+        'url' => isset($result['url']) ? esc_url_raw((string) $result['url']) : '',
+        'profile' => isset($result['profile']) && is_array($result['profile']) ? $result['profile'] : array(),
+        'metrics' => $safe_metrics,
+        'source' => isset($result['source']) ? sanitize_text_field((string) $result['source']) : 'browser',
+        'note' => isset($result['note']) ? sanitize_text_field((string) $result['note']) : '',
+    );
+}
+
+function plugency_dev_help_get_perf_tests(): array
+{
+    $saved = get_option('plugency_dev_help_perf_tests', array());
+    if (!is_array($saved)) {
+        $saved = array();
+    }
+    $defaults = plugency_dev_help_default_perf_tests();
+    $merged = array_merge($defaults, $saved);
+    $merged['history'] = array_slice(is_array($merged['history']) ? $merged['history'] : array(), 0, 80);
+    $merged['alerts'] = array_slice(is_array($merged['alerts']) ? $merged['alerts'] : array(), 0, 80);
+    $merged['schedules'] = is_array($merged['schedules']) ? array_values($merged['schedules']) : array();
+    $merged['webhook'] = isset($merged['webhook']) ? esc_url_raw((string) $merged['webhook']) : '';
+    return $merged;
+}
+
+function plugency_dev_help_perf_frequency_seconds(string $frequency): int
+{
+    switch ($frequency) {
+        case '15m':
+            return 15 * MINUTE_IN_SECONDS;
+        case 'hourly':
+            return HOUR_IN_SECONDS;
+        case '6h':
+            return 6 * HOUR_IN_SECONDS;
+        case 'daily':
+            return DAY_IN_SECONDS;
+        case 'weekly':
+            return WEEK_IN_SECONDS;
+        default:
+            return HOUR_IN_SECONDS;
+    }
+}
+
+function plugency_dev_help_save_perf_tests(array $data): array
+{
+    $current = plugency_dev_help_get_perf_tests();
+    if (isset($data['history']) && is_array($data['history'])) {
+        $current['history'] = array_slice(array_map('plugency_dev_help_normalize_perf_result', $data['history']), 0, 80);
+    }
+    if (isset($data['alerts']) && is_array($data['alerts'])) {
+        $current['alerts'] = array_slice($data['alerts'], 0, 80);
+    }
+    if (isset($data['webhook'])) {
+        $current['webhook'] = esc_url_raw((string) $data['webhook']);
+    }
+    if (isset($data['schedules']) && is_array($data['schedules'])) {
+        $sanitized = array();
+        foreach ($data['schedules'] as $schedule) {
+            if (!is_array($schedule) || empty($schedule['url'])) {
+                continue;
+            }
+            $frequency = isset($schedule['frequency']) ? sanitize_text_field((string) $schedule['frequency']) : 'daily';
+            $sanitized[] = array(
+                'id' => isset($schedule['id']) ? sanitize_text_field((string) $schedule['id']) : uniqid('sched_', true),
+                'url' => esc_url_raw((string) $schedule['url']),
+                'frequency' => $frequency,
+                'profile' => isset($schedule['profile']) && is_array($schedule['profile']) ? $schedule['profile'] : array(),
+                'next_run' => isset($schedule['next_run']) ? (int) $schedule['next_run'] : (time() + plugency_dev_help_perf_frequency_seconds($frequency)),
+                'last_run' => isset($schedule['last_run']) ? (int) $schedule['last_run'] : 0,
+            );
+        }
+        $current['schedules'] = $sanitized;
+    }
+    update_option('plugency_dev_help_perf_tests', $current, false);
+    return $current;
+}
+
+function plugency_dev_help_record_perf_result(array $result): array
+{
+    $data = plugency_dev_help_get_perf_tests();
+    $normalized = plugency_dev_help_normalize_perf_result($result);
+    array_unshift($data['history'], $normalized);
+    $data['history'] = array_slice($data['history'], 0, 80);
+    update_option('plugency_dev_help_perf_tests', $data, false);
+    return $data;
+}
+
+function plugency_dev_help_probe_url(string $url): array
+{
+    if ($url === '') {
+        return array();
+    }
+    $start = microtime(true);
+    $response = wp_remote_get(
+        $url,
+        array(
+            'timeout' => 12,
+            'redirection' => 3,
+            'user-agent' => 'plugency-dev-help/1.0',
+        )
+    );
+    $elapsed = (microtime(true) - $start) * 1000;
+    $status = is_wp_error($response) ? 0 : wp_remote_retrieve_response_code($response);
+    $body = is_wp_error($response) ? '' : wp_remote_retrieve_body($response);
+    $bytes = strlen((string) $body);
+
+    return plugency_dev_help_normalize_perf_result(
+        array(
+            'url' => $url,
+            'source' => 'server-probe',
+            'ts' => time(),
+            'metrics' => array(
+                'ttfb_ms' => round($elapsed, 2),
+                'weight_kb' => $bytes > 0 ? round($bytes / 1024, 2) : null,
+                'requests' => null,
+            ),
+            'note' => $status ? 'Server probe (TTFB/size only).' : 'Probe failed',
+        )
+    );
+}
+
+function plugency_dev_help_execute_perf_schedules(): void
+{
+    $data = plugency_dev_help_get_perf_tests();
+    if (empty($data['schedules'])) {
+        return;
+    }
+    $updated = false;
+    foreach ($data['schedules'] as &$schedule) {
+        $next_run = isset($schedule['next_run']) ? (int) $schedule['next_run'] : 0;
+        if ($next_run > time()) {
+            continue;
+        }
+        $result = plugency_dev_help_probe_url(isset($schedule['url']) ? (string) $schedule['url'] : '');
+        if (!empty($result)) {
+            array_unshift($data['history'], $result);
+            $data['history'] = array_slice($data['history'], 0, 80);
+        }
+        $schedule['last_run'] = time();
+        $schedule['next_run'] = time() + plugency_dev_help_perf_frequency_seconds(isset($schedule['frequency']) ? (string) $schedule['frequency'] : 'daily');
+        $updated = true;
+    }
+    if ($updated) {
+        plugency_dev_help_save_perf_tests($data);
+    }
+}
+
+add_action('plugency_dev_help_perf_test_cron', 'plugency_dev_help_execute_perf_schedules');
+
+function plugency_dev_help_log_budget_violation(string $metric, $actual, $budget): void
+{
+    $message = sprintf(
+        '[Plugency] Budget exceeded: %s actual=%s budget=%s url=%s time=%s',
+        $metric,
+        is_scalar($actual) ? $actual : json_encode($actual),
+        is_scalar($budget) ? $budget : json_encode($budget),
+        isset($_SERVER['REQUEST_URI']) ? esc_url_raw((string) $_SERVER['REQUEST_URI']) : '(unknown)',
+        gmdate('c')
+    );
+    if (function_exists('error_log')) {
+        @error_log($message);
+    }
+}
+
+function plugency_dev_help_opcache_info(): array
+{
+    $available = function_exists('opcache_get_status');
+    $status = $available ? @opcache_get_status(false) : null;
+    $config = $available && function_exists('opcache_get_configuration') ? @opcache_get_configuration() : null;
+    $enabled = $available && is_array($status) && isset($status['opcache_enabled']) ? (bool) $status['opcache_enabled'] : false;
+    $scripts = array();
+    $missed = array();
+    $history = get_option('plugency_dev_help_opcache_history', array());
+    if (!is_array($history)) {
+        $history = array();
+    }
+    if ($enabled && isset($status['scripts']) && is_array($status['scripts'])) {
+        $scripts = array_values($status['scripts']);
+    }
+    if ($enabled && isset($status['scripts']) && is_array($status['scripts'])) {
+        $cached_paths = array_map(static function ($item) {
+            return isset($item['full_path']) ? (string) $item['full_path'] : '';
+        }, $status['scripts']);
+        $cached_lookup = array_flip(array_filter($cached_paths));
+        $included = get_included_files();
+        foreach ($included as $file) {
+            if (!isset($cached_lookup[$file])) {
+                $missed[] = $file;
+            }
+        }
+        $missed = array_slice($missed, 0, 50);
+    }
+    if ($enabled && isset($status['opcache_statistics']) && is_array($status['opcache_statistics'])) {
+        $stats = $status['opcache_statistics'];
+        $used_memory = isset($status['memory_usage']['used_memory']) ? (float) $status['memory_usage']['used_memory'] : 0;
+        $free_memory = isset($status['memory_usage']['free_memory']) ? (float) $status['memory_usage']['free_memory'] : 0;
+        $wasted_memory = isset($status['memory_usage']['wasted_memory']) ? (float) $status['memory_usage']['wasted_memory'] : 0;
+        $hits = isset($stats['hits']) ? (float) $stats['hits'] : 0;
+        $misses = isset($stats['misses']) ? (float) $stats['misses'] : 0;
+        $hit_rate = ($hits + $misses) > 0 ? ($hits / ($hits + $misses)) * 100 : 0;
+        $memory_total = $used_memory + $free_memory + $wasted_memory;
+        $entry = array(
+            'time' => gmdate('c'),
+            'hit_rate' => round($hit_rate, 2),
+            'used' => $used_memory,
+            'free' => $free_memory,
+            'wasted' => $wasted_memory,
+            'total' => $memory_total,
+        );
+        array_unshift($history, $entry);
+        if (count($history) > 40) {
+            $history = array_slice($history, 0, 40);
+        }
+        update_option('plugency_dev_help_opcache_history', $history, false);
+    }
+    $recommended = array(
+        'opcache.validate_timestamps' => '0 (set to 0 in production)',
+        'opcache.revalidate_freq' => '60',
+        'opcache.memory_consumption' => '128 or higher',
+        'opcache.interned_strings_buffer' => '16 or higher',
+        'opcache.max_accelerated_files' => '10000+ depending on site size',
+        'opcache.enable_cli' => '0 (unless CLI caching needed)',
+    );
+    return array(
+        'available' => $available,
+        'enabled' => $enabled,
+        'status' => is_array($status) ? $status : array(),
+        'config' => is_array($config) ? $config : array(),
+        'scripts' => $scripts,
+        'missed' => $missed,
+        'history' => $history,
+        'recommended' => $recommended,
+    );
+}
+
+function plugency_dev_help_cpt_taxonomy_info(): array
+{
+    $post_types = get_post_types(array(), 'objects');
+    $taxonomies = get_taxonomies(array(), 'objects');
+    $registrar = array();
+    $get_registrar = static function ($obj) use (&$registrar) {
+        $file = '';
+        if (!empty($obj->_builtin)) {
+            $file = 'core';
+        } else {
+            $file = isset($obj->plugin) ? $obj->plugin : '';
+            if (!$file && isset($obj->register_meta_box_cb) && is_callable($obj->register_meta_box_cb)) {
+                $ref = new ReflectionFunction($obj->register_meta_box_cb);
+                $file = (string) $ref->getFileName();
+            }
+        }
+        return $file ?: '(unknown)';
+    };
+    $cpt_items = array();
+    foreach ($post_types as $name => $obj) {
+        $registrar_file = $get_registrar($obj);
+        $counts = wp_count_posts($name);
+        $total = 0;
+        if ($counts && is_object($counts)) {
+            foreach ((array) $counts as $status => $count) {
+                $total += (int) $count;
+            }
+        }
+        $cpt_items[] = array(
+            'name' => $name,
+            'label' => isset($obj->label) ? $obj->label : $name,
+            'registrar' => $registrar_file,
+            'public' => !empty($obj->public),
+            'show_in_rest' => !empty($obj->show_in_rest),
+            'has_archive' => !empty($obj->has_archive),
+            'hierarchical' => !empty($obj->hierarchical),
+            'rest_base' => isset($obj->rest_base) ? $obj->rest_base : '',
+            'rewrite' => isset($obj->rewrite) ? $obj->rewrite : array(),
+            'total' => $total,
+            'taxonomies' => isset($obj->taxonomies) ? (array) $obj->taxonomies : array(),
+        );
+    }
+    $tax_items = array();
+    foreach ($taxonomies as $name => $obj) {
+        $registrar_file = $get_registrar($obj);
+        $terms = get_terms(array('taxonomy' => $name, 'hide_empty' => false, 'number' => 1, 'fields' => 'count'));
+        $count = is_wp_error($terms) ? 0 : (int) $terms;
+        $tax_items[] = array(
+            'name' => $name,
+            'label' => isset($obj->label) ? $obj->label : $name,
+            'registrar' => $registrar_file,
+            'public' => !empty($obj->public),
+            'show_in_rest' => !empty($obj->show_in_rest),
+            'hierarchical' => !empty($obj->hierarchical),
+            'rewrite' => isset($obj->rewrite) ? $obj->rewrite : array(),
+            'object_type' => isset($obj->object_type) ? (array) $obj->object_type : array(),
+            'count' => $count,
+        );
+    }
+    global $wp_rewrite;
+    $rewrite_rules = $wp_rewrite instanceof WP_Rewrite ? $wp_rewrite->wp_rewrite_rules() : array();
+    $conflicts = array();
+    if (is_array($rewrite_rules)) {
+        $seen = array();
+        foreach ($rewrite_rules as $regex => $target) {
+            if (isset($seen[$regex])) {
+                $conflicts[] = array('regex' => $regex, 'targets' => array($seen[$regex], $target));
+            } else {
+                $seen[$regex] = $target;
+            }
+        }
+    }
+    return array(
+        'post_types' => $cpt_items,
+        'taxonomies' => $tax_items,
+        'rewrite_conflicts' => $conflicts,
+    );
+}
+
+function plugency_dev_help_default_heartbeat_settings(): array
+{
+    return array(
+        'intervals' => array(
+            'frontend' => 60,
+            'admin' => 30,
+            'post_edit' => 15,
+        ),
+        'disable_dashboard' => true,
+        'disable_list_screens' => true,
+        'ab_test' => array(
+            'variant_a' => 30,
+            'variant_b' => 60,
+            'enabled' => false,
+        ),
+    );
+}
+
+function plugency_dev_help_recommended_heartbeat_settings(): array
+{
+    return array(
+        'intervals' => array(
+            'frontend' => 60,
+            'admin' => 45,
+            'post_edit' => 20,
+        ),
+        'disable_dashboard' => true,
+        'disable_list_screens' => true,
+        'ab_test' => array(
+            'variant_a' => 30,
+            'variant_b' => 60,
+            'enabled' => false,
+        ),
+    );
+}
+
+function plugency_dev_help_get_heartbeat_settings(): array
+{
+    $defaults = plugency_dev_help_default_heartbeat_settings();
+    $saved = get_option('plugency_dev_help_heartbeat', array());
+    if (!is_array($saved)) {
+        $saved = array();
+    }
+    $intervals = isset($saved['intervals']) && is_array($saved['intervals']) ? $saved['intervals'] : array();
+    $settings = $defaults;
+    foreach ($defaults['intervals'] as $key => $val) {
+        if (isset($intervals[$key])) {
+            $settings['intervals'][$key] = max(1, (int) $intervals[$key]);
+        }
+    }
+    $settings['disable_dashboard'] = isset($saved['disable_dashboard']) ? (bool) $saved['disable_dashboard'] : $defaults['disable_dashboard'];
+    $settings['disable_list_screens'] = isset($saved['disable_list_screens']) ? (bool) $saved['disable_list_screens'] : $defaults['disable_list_screens'];
+    $ab = isset($saved['ab_test']) && is_array($saved['ab_test']) ? $saved['ab_test'] : array();
+    $settings['ab_test'] = array(
+        'variant_a' => isset($ab['variant_a']) ? max(1, (int) $ab['variant_a']) : $defaults['ab_test']['variant_a'],
+        'variant_b' => isset($ab['variant_b']) ? max(1, (int) $ab['variant_b']) : $defaults['ab_test']['variant_b'],
+        'enabled' => isset($ab['enabled']) ? (bool) $ab['enabled'] : $defaults['ab_test']['enabled'],
+    );
+    return $settings;
+}
+
+function plugency_dev_help_save_heartbeat_settings(array $input): array
+{
+    $current = plugency_dev_help_get_heartbeat_settings();
+    if (isset($input['intervals']) && is_array($input['intervals'])) {
+        foreach ($current['intervals'] as $key => $val) {
+            if (isset($input['intervals'][$key])) {
+                $current['intervals'][$key] = max(1, (int) $input['intervals'][$key]);
+            }
+        }
+    }
+    if (isset($input['disable_dashboard'])) {
+        $current['disable_dashboard'] = (bool) $input['disable_dashboard'];
+    }
+    if (isset($input['disable_list_screens'])) {
+        $current['disable_list_screens'] = (bool) $input['disable_list_screens'];
+    }
+    if (isset($input['ab_test']) && is_array($input['ab_test'])) {
+        $ab = $input['ab_test'];
+        $current['ab_test']['variant_a'] = isset($ab['variant_a']) ? max(1, (int) $ab['variant_a']) : $current['ab_test']['variant_a'];
+        $current['ab_test']['variant_b'] = isset($ab['variant_b']) ? max(1, (int) $ab['variant_b']) : $current['ab_test']['variant_b'];
+        $current['ab_test']['enabled'] = isset($ab['enabled']) ? (bool) $ab['enabled'] : $current['ab_test']['enabled'];
+    }
+    update_option('plugency_dev_help_heartbeat', $current, false);
+    return $current;
+}
+
+function plugency_dev_help_is_heartbeat_request(): bool
+{
+    return defined('DOING_AJAX') && DOING_AJAX && isset($_POST['action']) && $_POST['action'] === 'heartbeat';
+}
+
+function plugency_dev_help_heartbeat_page_type(): string
+{
+    if (is_admin()) {
+        global $pagenow;
+        if ($pagenow === 'post.php' || $pagenow === 'post-new.php') {
+            return 'post_edit';
+        }
+        if ($pagenow === 'index.php' || $pagenow === 'dashboard.php') {
+            return 'dashboard';
+        }
+        if ($pagenow && strpos((string) $pagenow, 'edit.php') !== false) {
+            return 'list';
+        }
+        return 'admin';
+    }
+    return 'frontend';
+}
+
+function plugency_dev_help_record_heartbeat(array $data, string $screen_id = ''): void
+{
+    $log = get_option('plugency_dev_help_heartbeat_log', array());
+    if (!is_array($log)) {
+        $log = array();
+    }
+    $start = isset($GLOBALS['plugency_heartbeat_start']) ? (float) $GLOBALS['plugency_heartbeat_start'] : microtime(true);
+    $duration = microtime(true) - $start;
+    $payload_size = strlen(json_encode($data));
+    $memory = function_exists('memory_get_peak_usage') ? memory_get_peak_usage(true) : 0;
+    $page_type = plugency_dev_help_heartbeat_page_type();
+    $settings = plugency_dev_help_get_heartbeat_settings();
+    $interval = isset($settings['intervals'][$page_type]) ? (int) $settings['intervals'][$page_type] : 15;
+    $entry = array(
+        'time' => gmdate('c'),
+        'page_type' => $page_type,
+        'screen' => $screen_id,
+        'payload_bytes' => $payload_size,
+        'duration_ms' => round($duration * 1000, 2),
+        'memory_bytes' => $memory,
+        'interval' => $interval,
+        'keys' => array_keys($data),
+    );
+    array_unshift($log, $entry);
+    if (count($log) > 40) {
+        $log = array_slice($log, 0, 40);
+    }
+    update_option('plugency_dev_help_heartbeat_log', $log, false);
+}
+
+function plugency_dev_help_heartbeat_usage(array $log): array
+{
+    $usage = array();
+    foreach ($log as $entry) {
+        if (!isset($entry['keys']) || !is_array($entry['keys'])) {
+            continue;
+        }
+        foreach ($entry['keys'] as $key) {
+            $label = (string) $key;
+            if (!isset($usage[$label])) {
+                $usage[$label] = 0;
+            }
+            $usage[$label]++;
+        }
+    }
+    arsort($usage);
+    return $usage;
+}
+
+function plugency_dev_help_estimate_heartbeat_savings(array $log, array $settings, array $recommended): array
+{
+    $total_cost_ms = 0;
+    $total_events = 0;
+    foreach ($log as $entry) {
+        $total_cost_ms += isset($entry['duration_ms']) ? (float) $entry['duration_ms'] : 0;
+        $total_events++;
+    }
+    $estimated = array(
+        'events' => $total_events,
+        'runtime_ms' => round($total_cost_ms, 2),
+        'savings_ms' => 0,
+        'savings_pct' => 0,
+    );
+    if ($total_events === 0) {
+        return $estimated;
+    }
+    foreach ($log as $entry) {
+        $type = isset($entry['page_type']) ? $entry['page_type'] : 'admin';
+        $actual_interval = isset($entry['interval']) ? (int) $entry['interval'] : 15;
+        $recommended_interval = isset($recommended['intervals'][$type]) ? (int) $recommended['intervals'][$type] : $actual_interval;
+        if ($recommended_interval > $actual_interval) {
+            $ratio = ($recommended_interval / max(1, $actual_interval)) - 1;
+            $estimated['savings_ms'] += ($entry['duration_ms'] ?? 0) * $ratio;
+        }
+    }
+    if ($estimated['runtime_ms'] > 0) {
+        $estimated['savings_pct'] = round(($estimated['savings_ms'] / $estimated['runtime_ms']) * 100, 2);
+    }
+    $estimated['savings_ms'] = round($estimated['savings_ms'], 2);
+    return $estimated;
+}
+
+add_action('init', static function () {
+    if (plugency_dev_help_can_view() && plugency_dev_help_is_heartbeat_request()) {
+        $GLOBALS['plugency_heartbeat_start'] = microtime(true);
+    }
+});
+
+add_filter('heartbeat_received', static function ($response, $data, $screen_id) {
+    if (plugency_dev_help_can_view() && plugency_dev_help_is_heartbeat_request()) {
+        plugency_dev_help_record_heartbeat(is_array($data) ? $data : array(), is_string($screen_id) ? $screen_id : '');
+    }
+    return $response;
+}, 999, 3);
+
+add_filter('heartbeat_settings', static function ($settings) {
+    $config = plugency_dev_help_get_heartbeat_settings();
+    $type = plugency_dev_help_heartbeat_page_type();
+    if (!isset($settings['interval']) || !is_numeric($settings['interval'])) {
+        $settings['interval'] = 15;
+    }
+    if ($config['disable_dashboard'] && $type === 'dashboard') {
+        $settings['interval'] = 120;
+        $settings['suspend'] = 'dashboard';
+        return $settings;
+    }
+    if ($config['disable_list_screens'] && $type === 'list') {
+        $settings['interval'] = 120;
+        $settings['suspend'] = 'list';
+        return $settings;
+    }
+    if (isset($config['intervals'][$type])) {
+        $settings['interval'] = max(1, (int) $config['intervals'][$type]);
+    }
+    return $settings;
+}, 20);
+
+function plugency_dev_help_allowed_security_headers(): array
+{
+    return array(
+        'strict-transport-security',
+        'content-security-policy',
+        'x-content-type-options',
+        'x-frame-options',
+        'referrer-policy',
+        'permissions-policy',
+        'cross-origin-resource-policy',
+        'cross-origin-opener-policy',
+        'cross-origin-embedder-policy',
+        'x-xss-protection',
+        'x-permitted-cross-domain-policies',
+        'expect-ct',
+        'content-security-policy-report-only',
+        'access-control-allow-origin',
+        'access-control-allow-methods',
+        'access-control-allow-headers',
+        'cache-control',
+        'pragma',
+        'expires',
+        'content-encoding',
+        'vary',
+        'accept-encoding',
+    );
+}
+
+function plugency_dev_help_normalize_header_name(string $name): string
+{
+    $parts = array_map(static function ($part) {
+        return ucwords(strtolower($part));
+    }, explode('-', trim($name)));
+    return implode('-', $parts);
+}
+
+function plugency_dev_help_default_security_headers(): array
+{
+    $headers = array(
+        'Content-Security-Policy' => "default-src 'self'; img-src * data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval' https:; style-src 'self' 'unsafe-inline' https:; font-src 'self' data: https:; connect-src *; frame-ancestors 'self'; upgrade-insecure-requests",
+        'X-Content-Type-Options' => 'nosniff',
+        'X-Frame-Options' => 'SAMEORIGIN',
+        'Referrer-Policy' => 'strict-origin-when-cross-origin',
+        'Permissions-Policy' => 'camera=(), microphone=(), geolocation=(), interest-cohort=()',
+        'Cross-Origin-Resource-Policy' => 'same-origin',
+        'Cross-Origin-Opener-Policy' => 'same-origin',
+        'X-XSS-Protection' => '1; mode=block',
+        'X-Permitted-Cross-Domain-Policies' => 'none',
+        'Expect-CT' => 'max-age=86400, enforce',
+    );
+
+    if (is_ssl()) {
+        $headers['Strict-Transport-Security'] = 'max-age=63072000; includeSubDomains; preload';
+    }
+
+    return $headers;
+}
+
+function plugency_dev_help_sanitize_headers(array $headers): array
+{
+    $allowed = plugency_dev_help_allowed_security_headers();
+    $clean = array();
+    foreach ($headers as $name => $value) {
+        $name = is_string($name) ? trim($name) : '';
+        if ($name === '') {
+            continue;
+        }
+        $key = strtolower($name);
+        if (!in_array($key, $allowed, true)) {
+            continue;
+        }
+        $value = is_array($value) ? implode(', ', array_map('strval', $value)) : (string) $value;
+        $value = trim(substr($value, 0, 800));
+        if ($value === '') {
+            continue;
+        }
+        $normalized_name = plugency_dev_help_normalize_header_name($name);
+        $clean[$normalized_name] = $value;
+    }
+    return $clean;
+}
+
+function plugency_dev_help_get_security_headers(): array
+{
+    $saved = get_option('plugency_dev_help_security_headers', array());
+    if (!is_array($saved)) {
+        $saved = array();
+    }
+    $headers = isset($saved['headers']) && is_array($saved['headers']) ? $saved['headers'] : array();
+    $enabled = isset($saved['enabled']) ? (bool) $saved['enabled'] : false;
+    $source = isset($saved['source']) ? sanitize_text_field((string) $saved['source']) : 'manual';
+    $headers = plugency_dev_help_sanitize_headers($headers);
+    return array(
+        'enabled' => $enabled,
+        'headers' => $headers,
+        'source' => $source,
+        'updated' => isset($saved['updated']) ? (int) $saved['updated'] : 0,
+    );
+}
+
+function plugency_dev_help_save_security_headers(array $headers, bool $enabled = true, string $source = 'manual'): array
+{
+    $payload = array(
+        'enabled' => $enabled,
+        'headers' => plugency_dev_help_sanitize_headers($headers),
+        'source' => sanitize_text_field($source),
+        'updated' => time(),
+    );
+    update_option('plugency_dev_help_security_headers', $payload, false);
+    return $payload;
+}
+
+function plugency_dev_help_get_response_headers(): array
+{
+    $headers = array();
+    if (function_exists('headers_list')) {
+        foreach (headers_list() as $line) {
+            $parts = explode(':', (string) $line, 2);
+            if (count($parts) === 2) {
+                $headers[plugency_dev_help_normalize_header_name($parts[0])] = trim($parts[1]);
+            }
+        }
+    }
+    if (empty($headers) && function_exists('apache_response_headers')) {
+        $apache = @apache_response_headers();
+        if (is_array($apache)) {
+            foreach ($apache as $name => $value) {
+                $headers[plugency_dev_help_normalize_header_name($name)] = is_array($value) ? implode(', ', $value) : (string) $value;
+            }
+        }
+    }
+    return plugency_dev_help_clean_value($headers);
+}
+
+function plugency_dev_help_record_header_history(array $request_headers, array $response_headers): array
+{
+    $history = get_option('plugency_dev_help_header_history', array());
+    if (!is_array($history)) {
+        $history = array();
+    }
+    $entry = array(
+        'time' => gmdate('c'),
+        'uri' => isset($_SERVER['REQUEST_URI']) ? esc_url_raw((string) $_SERVER['REQUEST_URI']) : '',
+        'hash' => md5(json_encode(array($response_headers, $request_headers))),
+        'request_count' => count($request_headers),
+        'response_count' => count($response_headers),
+        'response' => plugency_dev_help_clean_value($response_headers),
+        'request' => plugency_dev_help_clean_value($request_headers),
+    );
+    $last = isset($history[0]) ? $history[0] : null;
+    $last_time = isset($last['time']) ? strtotime((string) $last['time']) : 0;
+    if ($last && isset($last['hash']) && $last['hash'] === $entry['hash'] && $last_time && (time() - $last_time) < 300) {
+        return $history;
+    }
+    array_unshift($history, $entry);
+    if (count($history) > 12) {
+        $history = array_slice($history, 0, 12);
+    }
+    update_option('plugency_dev_help_header_history', $history, false);
+    return $history;
+}
+
+function plugency_dev_help_send_security_headers(): void
+{
+    $policy = plugency_dev_help_get_security_headers();
+    if (empty($policy['enabled']) || empty($policy['headers']) || headers_sent()) {
+        return;
+    }
+    $response_headers = array();
+    if (function_exists('headers_list')) {
+        foreach (headers_list() as $line) {
+            $parts = explode(':', (string) $line, 2);
+            if (count($parts) === 2) {
+                $response_headers[plugency_dev_help_normalize_header_name($parts[0])] = trim($parts[1]);
+            }
+        }
+    }
+    foreach ($policy['headers'] as $name => $value) {
+        if ($name === 'Strict-Transport-Security' && !is_ssl()) {
+            continue;
+        }
+        if (isset($response_headers[$name]) && stripos((string) $response_headers[$name], (string) $value) !== false) {
+            continue;
+        }
+        @header($name . ': ' . $value, true);
+    }
+}
+
 function plugency_dev_help_enqueue_assets(): void
 {
     if (!plugency_dev_help_can_view()) {
@@ -56,6 +860,7 @@ function plugency_dev_help_enqueue_assets(): void
             'isFrontend' => !is_admin(),
             'pageId' => function_exists('get_queried_object_id') ? (int) get_queried_object_id() : 0,
             'homeUrl' => home_url(),
+            'budgets' => plugency_dev_help_get_budgets(),
         )
     );
 }
@@ -64,10 +869,19 @@ add_action('wp_enqueue_scripts', 'plugency_dev_help_enqueue_assets');
 add_action('admin_enqueue_scripts', 'plugency_dev_help_enqueue_assets');
 
 add_action('init', static function () {
+    $tests = plugency_dev_help_get_perf_tests();
+    if (!empty($tests['schedules']) && !wp_next_scheduled('plugency_dev_help_perf_test_cron')) {
+        wp_schedule_event(time() + MINUTE_IN_SECONDS, 'hourly', 'plugency_dev_help_perf_test_cron');
+    }
+});
+
+add_action('init', static function () {
     if (plugency_dev_help_can_view()) {
         add_action('all', 'plugency_dev_help_register_hook_trace', 1, 1);
     }
 });
+
+add_action('send_headers', 'plugency_dev_help_send_security_headers', 20);
 
 /**
  * Render helper to avoid repeating escaping logic.
@@ -425,6 +1239,8 @@ function plugency_dev_help_hook_event_start(...$args)
     );
     plugency_dev_help_hook_stack($stack);
 
+    plugency_dev_help_record_coverage();
+
     return $args[0] ?? null;
 }
 
@@ -457,6 +1273,74 @@ function plugency_dev_help_hook_event_end(...$args)
     plugency_dev_help_hook_events($events);
 
     return $args[0] ?? null;
+}
+
+/**
+ * Coverage tracking helpers.
+ */
+function plugency_dev_help_coverage_map(array $replace = null): array
+{
+    static $coverage = array();
+    if (is_array($replace)) {
+        $coverage = $replace;
+    }
+    return $coverage;
+}
+
+function plugency_dev_help_record_coverage(): void
+{
+    $frames = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 12);
+    $map = plugency_dev_help_coverage_map();
+    foreach ($frames as $depth => $frame) {
+        if (empty($frame['function'])) {
+            continue;
+        }
+        $func = $frame['function'];
+        if (isset($frame['class'])) {
+            $func = $frame['class'] . $frame['type'] . $func;
+        }
+        $file = isset($frame['file']) ? $frame['file'] : '';
+        $key = md5($func . '|' . $file);
+        if (!isset($map[$key])) {
+            $map[$key] = array(
+                'function' => $func,
+                'file' => $file,
+                'count' => 0,
+                'max_depth' => 0,
+                'last_seen' => microtime(true),
+            );
+        }
+        $map[$key]['count']++;
+        $map[$key]['max_depth'] = max($map[$key]['max_depth'], $depth);
+        $map[$key]['last_seen'] = microtime(true);
+    }
+    plugency_dev_help_coverage_map($map);
+}
+
+function plugency_dev_help_flush_coverage(): array
+{
+    $current = plugency_dev_help_coverage_map();
+    if (empty($current)) {
+        return array();
+    }
+    $saved = get_option('plugency_dev_help_coverage', array());
+    $merged = is_array($saved) ? $saved : array();
+    foreach ($current as $key => $data) {
+        if (!isset($merged[$key])) {
+            $merged[$key] = $data;
+            continue;
+        }
+        $merged[$key]['count'] += $data['count'];
+        $merged[$key]['max_depth'] = max($merged[$key]['max_depth'], $data['max_depth']);
+        $merged[$key]['last_seen'] = max($merged[$key]['last_seen'], $data['last_seen']);
+    }
+    uasort($merged, static function ($a, $b) {
+        return ($b['count'] ?? 0) <=> ($a['count'] ?? 0);
+    });
+    $merged = array_slice($merged, 0, 400, true);
+    update_option('plugency_dev_help_coverage', $merged, false);
+    plugency_dev_help_coverage_map(array());
+    return $merged;
 }
 
 function plugency_dev_help_hooks_insights(array $events): array
@@ -785,6 +1669,169 @@ function plugency_dev_help_get_assets(): array
     }
 
     return array($styles, $scripts);
+}
+
+function plugency_dev_help_transients_snapshot(array $queries = array()): array
+{
+    global $wpdb;
+    $now = time();
+    $table = $wpdb->options;
+    $meta_table = is_multisite() ? $wpdb->sitemeta : '';
+
+    $option_rows = $wpdb->get_results(
+        $wpdb->prepare(
+            "SELECT option_name, option_value, autoload FROM {$table} WHERE option_name LIKE %s OR option_name LIKE %s",
+            $wpdb->esc_like('_transient_') . '%',
+            $wpdb->esc_like('_site_transient_') . '%'
+        ),
+        ARRAY_A
+    );
+    $timeout_rows = $wpdb->get_results(
+        $wpdb->prepare(
+            "SELECT option_name, option_value FROM {$table} WHERE option_name LIKE %s OR option_name LIKE %s",
+            $wpdb->esc_like('_transient_timeout_') . '%',
+            $wpdb->esc_like('_site_transient_timeout_') . '%'
+        ),
+        ARRAY_A
+    );
+
+    $site_option_rows = array();
+    $site_timeout_rows = array();
+    if ($meta_table && is_multisite()) {
+        $site_option_rows = $wpdb->get_results(
+            $wpdb->prepare(
+                "SELECT meta_key AS option_name, meta_value AS option_value FROM {$meta_table} WHERE meta_key LIKE %s OR meta_key LIKE %s",
+                $wpdb->esc_like('_site_transient_') . '%',
+                $wpdb->esc_like('_transient_') . '%'
+            ),
+            ARRAY_A
+        );
+        $site_timeout_rows = $wpdb->get_results(
+            $wpdb->prepare(
+                "SELECT meta_key AS option_name, meta_value AS option_value FROM {$meta_table} WHERE meta_key LIKE %s OR meta_key LIKE %s",
+                $wpdb->esc_like('_site_transient_timeout_') . '%',
+                $wpdb->esc_like('_transient_timeout_') . '%'
+            ),
+            ARRAY_A
+        );
+    }
+
+    $option_rows = array_merge($option_rows, $site_option_rows);
+    $timeout_rows = array_merge($timeout_rows, $site_timeout_rows);
+
+    $timeouts = array();
+    foreach ($timeout_rows as $row) {
+        $timeouts[$row['option_name']] = (int) $row['option_value'];
+    }
+
+    $items = array();
+    $total_bytes = 0;
+    $expired_bytes = 0;
+    $counts = array(
+        'total' => 0,
+        'expired' => 0,
+        'orphan' => 0,
+        'never_used' => 0,
+        'site' => 0,
+        'single' => 0,
+    );
+
+    $query_hits = 0;
+    $query_writes = 0;
+    $created = array();
+    $read = array();
+    foreach (is_array($queries) ? $queries : array() as $q) {
+        $sql = isset($q['0']) ? strtolower((string) $q[0]) : '';
+        if (strpos($sql, '_transient') === false) {
+            continue;
+        }
+        if (strpos($sql, 'select') === 0) {
+            $query_hits++;
+            preg_match_all('/_transient[_a-z0-9]+/i', $sql, $matches);
+            foreach ($matches[0] as $name) {
+                $read[$name] = true;
+            }
+        } elseif (strpos($sql, 'insert') === 0 || strpos($sql, 'update') === 0 || strpos($sql, 'delete') === 0) {
+            $query_writes++;
+            preg_match_all('/_transient[_a-z0-9]+/i', $sql, $matches);
+            foreach ($matches[0] as $name) {
+                $created[$name] = true;
+            }
+        }
+    }
+
+    foreach ($option_rows as $row) {
+        $name = isset($row['option_name']) ? (string) $row['option_name'] : '';
+        if (strpos($name, '_transient_timeout_') !== false) {
+            continue;
+        }
+        $is_site = strpos($name, '_site_transient_') === 0;
+        $short = $is_site ? substr($name, strlen('_site_transient_')) : substr($name, strlen('_transient_'));
+        $timeout_key = ($is_site ? '_site_transient_timeout_' : '_transient_timeout_') . $short;
+        $expires = isset($timeouts[$timeout_key]) ? (int) $timeouts[$timeout_key] : null;
+        $expired = $expires !== null && $expires > 0 && $expires < $now;
+        $size = strlen((string) maybe_serialize($row['option_value']));
+        $total_bytes += $size;
+        if ($expired) {
+            $expired_bytes += $size;
+        }
+        $status = $expired ? 'expired' : 'active';
+        $orphan = !isset($timeouts[$timeout_key]) || $row['option_value'] === null;
+        if ($orphan) {
+            $status = 'orphan';
+        }
+        $source_guess = '';
+        if (preg_match('/^([a-z0-9\-]+)/i', (string) $short, $m)) {
+            $source_guess = $m[1];
+        }
+
+        $items[] = array(
+            'name' => $short,
+            'full_name' => $name,
+            'type' => $is_site ? 'site' : 'single',
+            'expires' => $expires,
+            'expired' => $expired,
+            'orphan' => $orphan,
+            'size' => $size,
+            'autoload' => isset($row['autoload']) ? $row['autoload'] : '',
+            'status' => $status,
+            'source' => $source_guess !== '' ? $source_guess : 'unknown',
+            'never_used' => isset($created[$name]) && !isset($read[$name]),
+        );
+        $counts['total']++;
+        $counts[$is_site ? 'site' : 'single']++;
+        if ($expired) {
+            $counts['expired']++;
+        }
+        if ($orphan) {
+            $counts['orphan']++;
+        }
+        if (isset($created[$name]) && !isset($read[$name])) {
+            $counts['never_used']++;
+        }
+    }
+
+    $space = array(
+        'total_bytes' => $total_bytes,
+        'expired_bytes' => $expired_bytes,
+        'expired_readable' => size_format((float) $expired_bytes),
+        'total_readable' => size_format((float) $total_bytes),
+    );
+
+    return array(
+        'items' => $items,
+        'counts' => $counts,
+        'space' => $space,
+        'queries' => array(
+            'hits' => $query_hits,
+            'writes' => $query_writes,
+        ),
+        'summary' => array(
+            'expired' => $counts['expired'],
+            'orphan' => $counts['orphan'],
+            'never_used' => $counts['never_used'],
+        ),
+    );
 }
 
 function plugency_dev_help_asset_waterfall(array $styles, array $scripts): array
@@ -1193,6 +2240,17 @@ function plugency_dev_help_snapshot(): array
     $requests = is_array($requests) ? $requests : array();
     $queries = plugency_dev_help_get_queries();
     $queries = is_array($queries) ? $queries : array();
+    $response_headers = plugency_dev_help_get_response_headers();
+    $header_history = plugency_dev_help_record_header_history(isset($requests['HEADERS']) && is_array($requests['HEADERS']) ? $requests['HEADERS'] : array(), $response_headers);
+    $security_policy = plugency_dev_help_get_security_headers();
+    $opcache = plugency_dev_help_opcache_info();
+    $cpt_info = plugency_dev_help_cpt_taxonomy_info();
+    $heartbeat_log = get_option('plugency_dev_help_heartbeat_log', array());
+    $heartbeat_log = is_array($heartbeat_log) ? $heartbeat_log : array();
+    $heartbeat_settings = plugency_dev_help_get_heartbeat_settings();
+    $heartbeat_recommended = plugency_dev_help_recommended_heartbeat_settings();
+    $heartbeat_usage = plugency_dev_help_heartbeat_usage($heartbeat_log);
+    $heartbeat_savings = plugency_dev_help_estimate_heartbeat_savings($heartbeat_log, $heartbeat_settings, $heartbeat_recommended);
     $debug_log = plugency_dev_help_get_debug_log();
     $insights = plugency_dev_help_query_insights($queries);
     $query_tables = plugency_dev_help_query_tables($queries);
@@ -1217,6 +2275,25 @@ function plugency_dev_help_snapshot(): array
     $asset_waterfall = plugency_dev_help_asset_waterfall($styles, $scripts);
     $hook_events = plugency_dev_help_hook_events();
     $hook_insights = plugency_dev_help_hooks_insights($hook_events);
+    $coverage_recent = plugency_dev_help_flush_coverage();
+    $coverage_saved = get_option('plugency_dev_help_coverage', array());
+    $defined = get_defined_functions();
+    $user_functions = isset($defined['user']) && is_array($defined['user']) ? $defined['user'] : array();
+    $covered_names = array();
+    foreach (is_array($coverage_saved) ? $coverage_saved : array() as $row) {
+        if (isset($row['function'])) {
+            $covered_names[$row['function']] = true;
+        }
+    }
+    $unused_functions = array();
+    foreach ($user_functions as $fn) {
+        if (count($unused_functions) >= 100) {
+            break;
+        }
+        if (!isset($covered_names[$fn])) {
+            $unused_functions[] = $fn;
+        }
+    }
 
     return array(
         'summary' => $summary,
@@ -1233,9 +2310,32 @@ function plugency_dev_help_snapshot(): array
         'insights' => $insights,
         'query_tables' => $query_tables,
         'query_explain' => $query_explain,
+        'opcache' => $opcache,
+        'heartbeat' => array(
+            'log' => $heartbeat_log,
+            'settings' => $heartbeat_settings,
+            'recommended' => $heartbeat_recommended,
+            'usage' => $heartbeat_usage,
+            'savings' => $heartbeat_savings,
+        ),
+        'headers' => array(
+            'request' => isset($requests['HEADERS']) ? $requests['HEADERS'] : array(),
+            'response' => $response_headers,
+            'history' => $header_history,
+            'policy' => $security_policy,
+            'recommended' => plugency_dev_help_default_security_headers(),
+        ),
+        'content_models' => $cpt_info,
+        'transients' => plugency_dev_help_transients_snapshot($queries),
+        'perf_tests' => plugency_dev_help_get_perf_tests(),
         'hooks' => array(
             'events' => is_array($hook_events) ? $hook_events : array(),
             'insights' => is_array($hook_insights) ? $hook_insights : array('total' => 0, 'slowest' => array(), 'max' => 0, 'threshold' => 0.05),
+        ),
+        'coverage' => array(
+            'recent' => array_values($coverage_recent),
+            'aggregate' => is_array($coverage_saved) ? array_values($coverage_saved) : array(),
+            'unused' => $unused_functions,
         ),
         'debug_log' => $debug_log,
         'debug_enabled' => defined('WP_DEBUG') && WP_DEBUG,
@@ -1354,6 +2454,7 @@ function plugency_dev_help_render(): void
             <button data-tab="requests" role="tab" aria-selected="false">Requests</button>
             <button data-tab="context" role="tab" aria-selected="false">Context</button>
             <button data-tab="database" role="tab" aria-selected="false">Database</button>
+            <button data-tab="api" role="tab" aria-selected="false">API Requests</button>
             <button data-tab="hooks" role="tab" aria-selected="false">Hooks</button>
             <button data-tab="logs" role="tab" aria-selected="false">Logs</button>
         </div>
@@ -1623,6 +2724,240 @@ function plugency_dev_help_render(): void
                         <?php endif; ?>
                     </div>
                 </div>
+                <div class="plugency-card" data-role="preload-card">
+                    <div class="plugency-card-header">
+                        <h3>Preload & Prefetch recommendations</h3>
+                        <div class="plugency-inline-actions wrap">
+                            <span class="plugency-badge neutral" data-role="preload-meta">Not evaluated</span>
+                            <button class="plugency-button ghost" type="button" data-action="run-preload-analysis">Analyze</button>
+                            <button class="plugency-button ghost" type="button" data-action="export-preload-hints">Export hints</button>
+                        </div>
+                    </div>
+                    <p class="plugency-small">Predict next pages, suggest preload/prefetch/preconnect hints, test strategies, and surface wasted preloads. Uses current asset inventory and recent navigation signals.</p>
+                    <div class="plugency-grid two">
+                        <div>
+                            <h4>Navigation patterns</h4>
+                            <div class="plugency-list" data-role="preload-nav">
+                                <div class="plugency-list-item">
+                                    <span class="plugency-source">Collecting recent navigation signals...</span>
+                                </div>
+                            </div>
+                            <h4>Resource hints</h4>
+                            <div class="plugency-pre compact" data-role="preload-hints">
+                                <pre>Run analysis to generate preload/prefetch/preconnect hints.</pre>
+                            </div>
+                            <div class="plugency-inline-actions wrap">
+                                <button class="plugency-button ghost" type="button" data-action="apply-preload-test">Start strategy test</button>
+                                <button class="plugency-button ghost" type="button" data-action="stop-preload-test">Stop test</button>
+                            </div>
+                        </div>
+                        <div>
+                            <h4>Effectiveness dashboard</h4>
+                            <ul class="plugency-meta">
+                                <li><span>Predicted next pages</span><strong data-role="preload-next-count">0</strong></li>
+                                <li><span>Hints generated</span><strong data-role="preload-hint-count">0</strong></li>
+                                <li><span>Wasted preloads</span><strong data-role="preload-wasted">0</strong></li>
+                                <li><span>Median saved ms</span><strong data-role="preload-saved">0</strong></li>
+                            </ul>
+                            <h4>Priority scoring</h4>
+                            <div class="plugency-list" data-role="preload-priority">
+                                <div class="plugency-list-item">
+                                    <span class="plugency-source">Waiting for analysis...</span>
+                                </div>
+                            </div>
+                            <h4>Implementation code</h4>
+                            <div class="plugency-pre compact" data-role="preload-code">
+                                <pre>Link hints will appear here after analysis.</pre>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="plugency-card" data-role="critical-css-card">
+                    <div class="plugency-card-header">
+                        <h3>Critical CSS</h3>
+                        <div class="plugency-inline-actions wrap">
+                            <span class="plugency-badge neutral" data-role="critical-css-meta">Awaiting analysis</span>
+                            <button class="plugency-button ghost" type="button" data-action="analyze-critical-css">Analyze above-the-fold</button>
+                            <button class="plugency-button ghost" type="button" data-action="copy-critical-inline" disabled>Copy inline</button>
+                            <button class="plugency-button ghost" type="button" data-action="copy-critical-external" disabled>Copy external</button>
+                            <button class="plugency-button ghost" type="button" data-action="copy-critical-head" disabled>Copy wp_head</button>
+                        </div>
+                    </div>
+                    <p class="plugency-small" data-role="critical-css-status">Detects visible content, extracts only the CSS needed for first paint, and suggests defer candidates.</p>
+                    <ul class="plugency-meta" data-role="critical-css-stats">
+                        <li><span>Original CSS</span><strong data-role="critical-css-original">-</strong></li>
+                        <li><span>Critical CSS</span><strong data-role="critical-css-critical">-</strong></li>
+                        <li><span>Savings</span><strong data-role="critical-css-savings">-</strong></li>
+                        <li><span>Est. LCP improvement</span><strong data-role="critical-css-lcp">-</strong></li>
+                    </ul>
+                    <div class="plugency-pre compact" data-role="critical-css-output">
+                        <pre>Run the analyzer to extract critical CSS for this view.</pre>
+                    </div>
+                    <h4>Defer these CSS files</h4>
+                    <div class="plugency-list" data-role="critical-css-defer-list">
+                        <div class="plugency-list-item">
+                            <span class="plugency-source">No analysis yet.</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="plugency-card" data-role="render-blocking-card">
+                    <div class="plugency-card-header">
+                        <h3>Render-blocking optimizer</h3>
+                        <div class="plugency-inline-actions wrap">
+                            <span class="plugency-badge neutral" data-role="render-blocking-meta">Scanning...</span>
+                            <button class="plugency-button ghost" type="button" data-action="render-blocking-simulate">Simulate</button>
+                            <button class="plugency-button ghost" type="button" data-action="render-blocking-apply">Apply (this page)</button>
+                            <button class="plugency-button ghost" type="button" data-action="render-blocking-export">Export code</button>
+                        </div>
+                    </div>
+                    <p class="plugency-small">Inventory render-blocking CSS/JS, inline critical CSS, defer/preload non-critical assets, and preview impact.</p>
+                    <div class="plugency-grid two">
+                        <div>
+                            <h4>Blocking resources</h4>
+                            <div class="plugency-list" data-role="render-blocking-list">
+                                <div class="plugency-list-item">
+                                    <span class="plugency-source">Collecting render-blocking assets...</span>
+                                </div>
+                            </div>
+                            <h4>Strategy simulator</h4>
+                            <div class="plugency-pre compact" data-role="render-blocking-sim">
+                                <pre>Run simulation to see predicted savings, CLS impact, and strategy steps.</pre>
+                            </div>
+                        </div>
+                        <div>
+                            <h4>Optimized loading code</h4>
+                            <div class="plugency-pre compact" data-role="render-blocking-code">
+                                <pre>Code snippets will appear here.</pre>
+                            </div>
+                            <h4>Progressive enhancement & fallbacks</h4>
+                            <div class="plugency-list" data-role="render-blocking-recos">
+                                <div class="plugency-list-item">
+                                    <span class="plugency-source">Recommendations pending analysis.</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="plugency-card" data-role="heartbeat-card">
+                    <div class="plugency-card-header">
+                        <h3>Heartbeat monitor</h3>
+                        <div class="plugency-inline-actions wrap">
+                            <span class="plugency-badge neutral" data-role="heartbeat-meta">Idle</span>
+                            <button class="plugency-button ghost" type="button" data-action="apply-heartbeat-recommended">Apply recommended</button>
+                            <button class="plugency-button ghost" type="button" data-action="save-heartbeat-settings">Save</button>
+                        </div>
+                    </div>
+                    <p class="plugency-small">Tracks WordPress Heartbeat frequency, payloads, and plugins using it. Tune per-page intervals and measure server load savings.</p>
+                    <div class="plugency-grid two">
+                        <div>
+                            <h4>Timeline</h4>
+                            <div class="plugency-list" data-role="heartbeat-timeline">
+                                <div class="plugency-list-item">
+                                    <span class="plugency-source">Waiting for heartbeat traffic...</span>
+                                </div>
+                            </div>
+                            <div class="plugency-inline-actions wrap">
+                                <button class="plugency-button ghost" type="button" data-action="start-heartbeat-test">Start A/B test</button>
+                                <button class="plugency-button ghost" type="button" data-action="stop-heartbeat-test">Stop A/B test</button>
+                            </div>
+                        </div>
+                        <div>
+                            <h4>Controls</h4>
+                            <div class="plugency-grid two">
+                                <label class="plugency-inline-input">
+                                    <span>Frontend interval (s)</span>
+                                    <input type="number" min="1" data-heartbeat-key="frontend" value="60">
+                                </label>
+                                <label class="plugency-inline-input">
+                                    <span>Admin interval (s)</span>
+                                    <input type="number" min="1" data-heartbeat-key="admin" value="30">
+                                </label>
+                                <label class="plugency-inline-input">
+                                    <span>Post edit interval (s)</span>
+                                    <input type="number" min="1" data-heartbeat-key="post_edit" value="15">
+                                </label>
+                                <label class="plugency-inline-input">
+                                    <span>Disable dashboard</span>
+                                    <select data-heartbeat-toggle="disable_dashboard">
+                                        <option value="1">Yes</option>
+                                        <option value="0">No</option>
+                                    </select>
+                                </label>
+                                <label class="plugency-inline-input">
+                                    <span>Disable list screens</span>
+                                    <select data-heartbeat-toggle="disable_list_screens">
+                                        <option value="1">Yes</option>
+                                        <option value="0">No</option>
+                                    </select>
+                                </label>
+                                <label class="plugency-inline-input">
+                                    <span>A/B Variant A (s)</span>
+                                    <input type="number" min="1" data-heartbeat-ab="variant_a" value="30">
+                                </label>
+                                <label class="plugency-inline-input">
+                                    <span>A/B Variant B (s)</span>
+                                    <input type="number" min="1" data-heartbeat-ab="variant_b" value="60">
+                                </label>
+                            </div>
+                            <div class="plugency-pre compact" data-role="heartbeat-impact">
+                                <pre>Calculating server impact...</pre>
+                            </div>
+                            <h4>Plugin usage</h4>
+                            <div class="plugency-list" data-role="heartbeat-usage">
+                                <div class="plugency-list-item">
+                                    <span class="plugency-source">No plugin signals yet.</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="plugency-card" data-role="opcache-card">
+                    <div class="plugency-card-header">
+                        <h3>OPcache</h3>
+                        <div class="plugency-inline-actions wrap">
+                            <span class="plugency-badge neutral" data-role="opcache-meta">Inspecting...</span>
+                            <button class="plugency-button ghost" type="button" data-action="clear-opcache">Clear cache</button>
+                        </div>
+                    </div>
+                    <p class="plugency-small">View OPcache statistics, memory usage, hit rates, cached scripts, and suggested config for optimal performance.</p>
+                    <div class="plugency-grid two">
+                        <div>
+                            <h4>Stats & trends</h4>
+                            <ul class="plugency-meta">
+                                <li><span>Enabled</span><strong data-role="opcache-enabled">-</strong></li>
+                                <li><span>Hit rate</span><strong data-role="opcache-hit-rate">-</strong></li>
+                                <li><span>Memory used</span><strong data-role="opcache-mem-used">-</strong></li>
+                                <li><span>Fragmentation</span><strong data-role="opcache-frag">-</strong></li>
+                            </ul>
+                            <div class="plugency-chart" data-role="opcache-trend-wrapper">
+                                <canvas width="520" height="140" data-role="opcache-trend"></canvas>
+                            </div>
+                            <div class="plugency-pre compact" data-role="opcache-config">
+                                <pre>Loading OPcache configuration...</pre>
+                            </div>
+                        </div>
+                        <div>
+                            <h4>Cached scripts</h4>
+                            <div class="plugency-list" data-role="opcache-scripts">
+                                <div class="plugency-list-item">
+                                    <span class="plugency-source">Gathering cached scripts...</span>
+                                </div>
+                            </div>
+                            <h4>Not cached (included)</h4>
+                            <div class="plugency-list" data-role="opcache-missed">
+                                <div class="plugency-list-item">
+                                    <span class="plugency-source">None detected yet.</span>
+                                </div>
+                            </div>
+                            <h4>Suggestions</h4>
+                            <div class="plugency-list" data-role="opcache-suggestions">
+                                <div class="plugency-list-item">
+                                    <span class="plugency-source">Evaluating config...</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <?php if ($is_frontend) : ?>
@@ -1659,11 +2994,173 @@ function plugency_dev_help_render(): void
                             </div>
                         </div>
                     </div>
+                    <div class="plugency-card" data-role="perf-budget-card">
+                        <div class="plugency-card-header">
+                            <h3>Performance budgets</h3>
+                            <span class="plugency-badge neutral" data-role="perf-budget-status">Not evaluated</span>
+                        </div>
+                        <p class="plugency-small" data-role="perf-budget-note">Set thresholds for key metrics. We’ll alert and log when budgets are exceeded.</p>
+                        <div class="plugency-grid two">
+                            <label class="plugency-inline-input">
+                                <span>LCP (ms)</span>
+                                <input type="number" min="0" data-budget-key="lcp_ms" value="0">
+                            </label>
+                            <label class="plugency-inline-input">
+                                <span>FID (ms)</span>
+                                <input type="number" min="0" data-budget-key="fid_ms" value="0">
+                            </label>
+                            <label class="plugency-inline-input">
+                                <span>CLS</span>
+                                <input type="number" min="0" step="0.01" data-budget-key="cls" value="0">
+                            </label>
+                            <label class="plugency-inline-input">
+                                <span>Total weight (KB)</span>
+                                <input type="number" min="0" data-budget-key="weight_kb" value="0">
+                            </label>
+                            <label class="plugency-inline-input">
+                                <span>Requests</span>
+                                <input type="number" min="0" data-budget-key="requests" value="0">
+                            </label>
+                        </div>
+                        <div class="plugency-inline-actions wrap">
+                            <button class="plugency-button ghost" type="button" data-action="save-budgets">Save budgets</button>
+                            <button class="plugency-button ghost" type="button" data-action="load-budgets">Reload</button>
+                            <button class="plugency-button ghost" type="button" data-action="reset-budgets">Reset defaults</button>
+                        </div>
+                        <h4>Budget progress</h4>
+                        <div class="plugency-list" data-role="perf-budget-bars">
+                            <div class="plugency-list-item">
+                                <span class="plugency-source">Run a performance scan to populate budgets.</span>
+                            </div>
+                        </div>
+                        <h4>Alerts & recommendations</h4>
+                    <div class="plugency-list" data-role="perf-budget-alerts">
+                        <div class="plugency-list-item">
+                            <span class="plugency-source">No alerts yet.</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="plugency-card" data-role="perf-monitor-card">
+                    <div class="plugency-card-header">
+                        <h3>Automated performance monitoring</h3>
+                        <div class="plugency-inline-actions wrap">
+                            <span class="plugency-badge neutral" data-role="perf-monitor-meta">Idle</span>
+                            <button class="plugency-button ghost" type="button" data-action="perf-monitor-run">Run now</button>
+                            <button class="plugency-button ghost" type="button" data-action="perf-monitor-export">Export</button>
+                        </div>
+                    </div>
+                    <p class="plugency-small">Schedules page tests, tracks Core Web Vitals/Lighthouse-style signals over time, and alerts on regressions or budget breaches.</p>
                     <div class="plugency-grid two">
-                        <div class="plugency-card">
-                            <div class="plugency-card-header">
-                                <h3>Advanced Signals</h3>
-                                <span class="plugency-badge neutral">Live</span>
+                        <div>
+                            <h4>Schedules</h4>
+                            <div class="plugency-inline-actions wrap">
+                                <input type="url" class="plugency-input" data-role="perf-monitor-url" placeholder="https://example.com/checkout">
+                                <select data-role="perf-monitor-frequency">
+                                    <option value="15m">15m</option>
+                                    <option value="hourly">Hourly</option>
+                                    <option value="6h">6 hours</option>
+                                    <option value="daily" selected>Daily</option>
+                                    <option value="weekly">Weekly</option>
+                                </select>
+                                <select data-role="perf-monitor-profile">
+                                    <option value="desktop">Desktop / 4G</option>
+                                    <option value="mobile">Mobile / 3G</option>
+                                    <option value="slow">Budget / slow 3G</option>
+                                </select>
+                                <button class="plugency-button ghost" type="button" data-action="perf-monitor-add">Add</button>
+                            </div>
+                            <h4>Plugin update pre-check</h4>
+                            <div class="plugency-inline-actions wrap">
+                                <input type="text" class="plugency-input" data-role="perf-monitor-plugin" placeholder="plugin-slug or name">
+                                <button class="plugency-button ghost" type="button" data-action="perf-monitor-plugin-check">Baseline before activation</button>
+                            </div>
+                            <div class="plugency-list" data-role="perf-monitor-schedules">
+                                <div class="plugency-list-item">
+                                    <span class="plugency-source">No schedules yet. Add a URL and cadence.</span>
+                                </div>
+                            </div>
+                            <h4>Regression alerts</h4>
+                            <div class="plugency-list" data-role="perf-monitor-alerts">
+                                <div class="plugency-list-item">
+                                    <span class="plugency-source">No regressions detected.</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div>
+                            <h4>Performance timeline</h4>
+                            <div class="plugency-chart" data-role="perf-monitor-chart-wrapper">
+                                <canvas width="560" height="140" data-role="perf-monitor-chart"></canvas>
+                            </div>
+                            <h4>Latest runs</h4>
+                            <div class="plugency-list" data-role="perf-monitor-latest">
+                                <div class="plugency-list-item">
+                                    <span class="plugency-source">Run a test to see vitals.</span>
+                                </div>
+                            </div>
+                            <h4>History</h4>
+                            <div class="plugency-list" data-role="perf-monitor-history">
+                                <div class="plugency-list-item">
+                                    <span class="plugency-source">History will appear here.</span>
+                                </div>
+                            </div>
+                            <div class="plugency-inline-input">
+                                <span>Webhook (external monitor)</span>
+                                <input type="url" data-role="perf-monitor-webhook" placeholder="https://monitor.example.com/hook">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="plugency-card" data-role="memory-profiler-card">
+                    <div class="plugency-card-header">
+                        <h3>Memory profiler</h3>
+                        <div class="plugency-inline-actions wrap">
+                            <span class="plugency-badge neutral" data-role="memory-status">Idle</span>
+                            <button class="plugency-button ghost" type="button" data-action="start-memory-profile">Start</button>
+                            <button class="plugency-button ghost" type="button" data-action="stop-memory-profile" disabled>Stop</button>
+                            <button class="plugency-button ghost" type="button" data-action="export-memory-profile" disabled>Export snapshot</button>
+                        </div>
+                    </div>
+                    <p class="plugency-small" data-role="memory-note">Tracks JS heap, DOM churn, listeners, globals, and detached nodes to flag leaks.</p>
+                    <ul class="plugency-meta">
+                        <li><span>JS heap used</span><strong data-role="memory-heap-used">n/a</strong></li>
+                        <li><span>JS heap total</span><strong data-role="memory-heap-total">n/a</strong></li>
+                        <li><span>DOM nodes</span><strong data-role="memory-dom-count">n/a</strong></li>
+                        <li><span>Event listeners</span><strong data-role="memory-listener-count">n/a</strong></li>
+                        <li><span>Globals</span><strong data-role="memory-global-count">n/a</strong></li>
+                    </ul>
+                    <div class="plugency-chart" data-role="memory-chart-wrapper">
+                        <canvas width="560" height="140" data-role="memory-chart"></canvas>
+                    </div>
+                    <h4>Suspicious objects</h4>
+                    <div class="plugency-table-wrapper">
+                        <table class="plugency-table" data-role="memory-suspect-table">
+                            <thead>
+                                <tr>
+                                    <th>Type</th>
+                                    <th>Details</th>
+                                    <th>Seen</th>
+                                    <th>Retention</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td colspan="4">No suspects yet. Start profiling and interact with the page.</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <h4>Leak recommendations</h4>
+                    <div class="plugency-list" data-role="memory-recommendations">
+                        <div class="plugency-list-item">
+                            <span class="plugency-source">Awaiting profiling data.</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="plugency-grid two">
+                    <div class="plugency-card">
+                        <div class="plugency-card-header">
+                            <h3>Advanced Signals</h3>
+                            <span class="plugency-badge neutral">Live</span>
                             </div>
                             <ul class="plugency-meta">
                                 <li><span>First Paint</span><strong data-role="perf-fp">Measuring...</strong></li>
@@ -1700,6 +3197,168 @@ function plugency_dev_help_render(): void
                                 </div>
                             </div>
                         </div>
+                        <div class="plugency-card" data-role="a11y-card">
+                            <div class="plugency-card-header">
+                                <h3>Accessibility audit</h3>
+                                <div class="plugency-inline-actions wrap">
+                                    <span class="plugency-badge neutral" data-role="a11y-score">Score --</span>
+                                    <button class="plugency-button ghost" type="button" data-action="run-a11y-audit">Run audit</button>
+                                    <button class="plugency-button ghost" type="button" data-action="fix-a11y-common" disabled>Fix common</button>
+                                    <button class="plugency-button ghost" type="button" data-action="export-a11y-report" disabled>Export</button>
+                                </div>
+                            </div>
+                            <p class="plugency-small">WCAG 2.1 checks: contrast, ARIA/roles, alt text, headings, keyboard/focus, motion, forms. Click an issue to highlight the element.</p>
+                            <div class="plugency-list" data-role="a11y-issues">
+                                <div class="plugency-list-item">
+                                    <span class="plugency-source">Awaiting audit...</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="plugency-card" data-role="form-ux-card">
+                            <div class="plugency-card-header">
+                                <h3>Form UX & Performance</h3>
+                                <div class="plugency-inline-actions wrap">
+                                    <span class="plugency-badge neutral" data-role="form-meta">Tracking...</span>
+                                    <button class="plugency-button ghost" type="button" data-action="export-form-report">Export</button>
+                                </div>
+                            </div>
+                            <p class="plugency-small">Tracks form abandonment, slow/problem fields, validation friction, accessibility gaps, spam signals, and A/B variants.</p>
+                            <div class="plugency-grid two">
+                                <div>
+                                    <h4>Interaction heatmap</h4>
+                                    <div class="plugency-list" data-role="form-heatmap">
+                                        <div class="plugency-list-item">
+                                            <span class="plugency-source">Waiting for form interactions...</span>
+                                        </div>
+                                    </div>
+                                    <h4>Abandonment funnel</h4>
+                                    <div class="plugency-chart" data-role="form-funnel-wrapper">
+                                        <canvas width="520" height="120" data-role="form-funnel"></canvas>
+                                    </div>
+                                    <h4>Validation errors</h4>
+                                    <div class="plugency-chart" data-role="form-validation-wrapper">
+                                        <canvas width="520" height="120" data-role="form-validation"></canvas>
+                                    </div>
+                                </div>
+                                <div>
+                                    <h4>Field analytics</h4>
+                                    <ul class="plugency-meta">
+                                        <li><span>Abandonment</span><strong data-role="form-abandon-rate">-</strong></li>
+                                        <li><span>Success rate</span><strong data-role="form-success-rate">-</strong></li>
+                                        <li><span>Avg load time</span><strong data-role="form-load-time">-</strong></li>
+                                        <li><span>Spam detected</span><strong data-role="form-spam">-</strong></li>
+                                    </ul>
+                                    <h4>Recommendations</h4>
+                                    <div class="plugency-list" data-role="form-recos">
+                                        <div class="plugency-list-item">
+                                            <span class="plugency-source">Collecting signals...</span>
+                                        </div>
+                                    </div>
+                                    <h4>A/B testing</h4>
+                                    <div class="plugency-inline-actions wrap">
+                                        <button class="plugency-button ghost" type="button" data-action="assign-form-variant">Assign variant</button>
+                                        <button class="plugency-button ghost" type="button" data-action="clear-form-variant">Reset variant</button>
+                                        <span class="plugency-badge neutral" data-role="form-variant">Variant: -</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="plugency-card" data-role="schema-card">
+                            <div class="plugency-card-header">
+                                <h3>Schema.org markup</h3>
+                                <div class="plugency-inline-actions wrap">
+                                    <span class="plugency-badge neutral" data-role="schema-meta">Validating...</span>
+                                    <button class="plugency-button ghost" type="button" data-action="schema-validate">Validate</button>
+                                    <button class="plugency-button ghost" type="button" data-action="schema-export">Export</button>
+                                </div>
+                            </div>
+                            <p class="plugency-small">Scan existing structured data, validate JSON-LD, suggest templates, and preview rich results.</p>
+                            <div class="plugency-grid two">
+                                <div>
+                                    <h4>Detected markup</h4>
+                                    <div class="plugency-list" data-role="schema-list">
+                                        <div class="plugency-list-item">
+                                            <span class="plugency-source">Scanning page for JSON-LD...</span>
+                                        </div>
+                                    </div>
+                                    <h4>Error / warning details</h4>
+                                    <div class="plugency-list" data-role="schema-errors">
+                                        <div class="plugency-list-item">
+                                            <span class="plugency-source">No validation run yet.</span>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div>
+                                    <h4>Live editor</h4>
+                                    <textarea class="plugency-textarea" rows="8" data-role="schema-editor" placeholder='{"@context":"https://schema.org","@type":"Article"}'></textarea>
+                                    <div class="plugency-inline-actions wrap">
+                                        <select data-role="schema-template">
+                                            <option value="">Select template</option>
+                                            <option value="Article">Article</option>
+                                            <option value="Product">Product</option>
+                                            <option value="Organization">Organization</option>
+                                            <option value="Person">Person</option>
+                                            <option value="Event">Event</option>
+                                        </select>
+                                        <button class="plugency-button ghost" type="button" data-action="schema-apply-template">Insert template</button>
+                                        <button class="plugency-button ghost" type="button" data-action="schema-preview">Preview rich result</button>
+                                    </div>
+                                    <div class="plugency-pre compact" data-role="schema-preview">
+                                        <pre>Preview will appear here.</pre>
+                                    </div>
+                                    <div class="plugency-pre compact" data-role="schema-templates">
+                                        <pre>Templates will be inserted into the editor for editing/validation.</pre>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="plugency-card" data-role="pwa-card">
+                            <div class="plugency-card-header">
+                                <h3>PWA & Service Worker</h3>
+                                <div class="plugency-inline-actions wrap">
+                                    <span class="plugency-badge neutral" data-role="pwa-meta">Checking...</span>
+                                    <button class="plugency-button ghost" type="button" data-action="pwa-refresh">Refresh</button>
+                                    <button class="plugency-button ghost" type="button" data-action="pwa-offline-toggle">Simulate offline</button>
+                                </div>
+                            </div>
+                            <p class="plugency-small">Monitor service worker lifecycle, caches, manifest, push registration, and PWA requirements.</p>
+                            <div class="plugency-grid two">
+                                <div>
+                                    <h4>Service worker & caches</h4>
+                                    <div class="plugency-list" data-role="pwa-sw-status">
+                                        <div class="plugency-list-item">
+                                            <span class="plugency-source">Checking service worker...</span>
+                                        </div>
+                                    </div>
+                                    <h4>Cache inspector</h4>
+                                    <div class="plugency-list" data-role="pwa-cache-list">
+                                        <div class="plugency-list-item">
+                                            <span class="plugency-source">Loading cache entries...</span>
+                                        </div>
+                                    </div>
+                                    <div class="plugency-inline-actions wrap">
+                                        <button class="plugency-button ghost" type="button" data-action="pwa-clear-cache">Clear caches</button>
+                                        <button class="plugency-button ghost" type="button" data-action="pwa-check-updates">Check SW update</button>
+                                    </div>
+                                </div>
+                                <div>
+                                    <h4>PWA checklist</h4>
+                                    <div class="plugency-list" data-role="pwa-checklist">
+                                        <div class="plugency-list-item">
+                                            <span class="plugency-source">Validating manifest, HTTPS, service worker...</span>
+                                        </div>
+                                    </div>
+                                    <h4>Push & background sync</h4>
+                                    <div class="plugency-pre compact" data-role="pwa-push">
+                                        <pre>Push registration status will appear here. Use this to verify push and background sync support.</pre>
+                                    </div>
+                                    <h4>Install / Rich results</h4>
+                                    <div class="plugency-pre compact" data-role="pwa-install">
+                                        <pre>App install prompt state and display mode will appear here.</pre>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
                         <div class="plugency-card">
                             <div class="plugency-card-header">
                                 <h3>Fonts</h3>
@@ -1708,6 +3367,85 @@ function plugency_dev_help_render(): void
                             <div class="plugency-list" data-role="perf-fonts-list">
                                 <div class="plugency-list-item">
                                     <span class="plugency-source">Collecting font usage...</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="plugency-card" data-role="font-optimizer-card">
+                            <div class="plugency-card-header">
+                                <h3>Web font optimization</h3>
+                                <div class="plugency-inline-actions wrap">
+                                    <span class="plugency-badge neutral" data-role="font-opt-meta">Analyzing...</span>
+                                    <button class="plugency-button ghost" type="button" data-action="font-opt-simulate">Simulate</button>
+                                    <button class="plugency-button ghost" type="button" data-action="font-opt-apply">Apply (this page)</button>
+                                    <button class="plugency-button ghost" type="button" data-action="font-opt-export">Export CSS</button>
+                                </div>
+                            </div>
+                            <p class="plugency-small">Inventory web fonts, detect FOIT/FOUT, suggest font-display, preloads, subsetting, and variable font alternatives.</p>
+                            <div class="plugency-grid two">
+                                <div>
+                                    <h4>Fonts & usage</h4>
+                                    <div class="plugency-list" data-role="font-opt-list">
+                                        <div class="plugency-list-item">
+                                            <span class="plugency-source">Collecting fonts...</span>
+                                        </div>
+                                    </div>
+                                    <h4>Loading strategy comparator</h4>
+                                    <div class="plugency-pre compact" data-role="font-opt-strategy">
+                                        <pre>Run simulation to compare current vs optimized load.</pre>
+                                    </div>
+                                </div>
+                                <div>
+                                    <h4>Recommendations</h4>
+                                    <div class="plugency-list" data-role="font-opt-recos">
+                                        <div class="plugency-list-item">
+                                            <span class="plugency-source">Evaluating font-display, preloads, and subsetting...</span>
+                                        </div>
+                                    </div>
+                                    <h4>Optimized @font-face & preload</h4>
+                                    <div class="plugency-pre compact" data-role="font-opt-code">
+                                        <pre>CSS snippets will appear here.</pre>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="plugency-card" data-role="wc-perf-card">
+                            <div class="plugency-card-header">
+                                <h3>WooCommerce Performance</h3>
+                                <div class="plugency-inline-actions wrap">
+                                    <span class="plugency-badge neutral" data-role="wc-perf-meta">Analyzing...</span>
+                                    <button class="plugency-button ghost" type="button" data-action="wc-perf-refresh">Refresh</button>
+                                    <button class="plugency-button ghost" type="button" data-action="wc-perf-export">Export</button>
+                                </div>
+                            </div>
+                            <p class="plugency-small">Focuses on cart/checkout, product queries, variation performance, transients, and REST endpoints.</p>
+                            <div class="plugency-grid two">
+                                <div>
+                                    <h4>Cart / checkout</h4>
+                                    <div class="plugency-list" data-role="wc-cart-checkout">
+                                        <div class="plugency-list-item">
+                                            <span class="plugency-source">Collecting cart/checkout signals...</span>
+                                        </div>
+                                    </div>
+                                    <h4>Product queries & variations</h4>
+                                    <div class="plugency-list" data-role="wc-query-list">
+                                        <div class="plugency-list-item">
+                                            <span class="plugency-source">Analyzing product queries...</span>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div>
+                                    <h4>DB & cache</h4>
+                                    <div class="plugency-list" data-role="wc-db-list">
+                                        <div class="plugency-list-item">
+                                            <span class="plugency-source">Checking indexes, transients, and object cache...</span>
+                                        </div>
+                                    </div>
+                                    <h4>Recommendations</h4>
+                                    <div class="plugency-list" data-role="wc-recos">
+                                        <div class="plugency-list-item">
+                                            <span class="plugency-source">Evaluating WooCommerce-specific optimizations...</span>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -1735,6 +3473,29 @@ function plugency_dev_help_render(): void
                             </div>
                         </div>
                     </div>
+                    <div class="plugency-card" data-role="third-party-governance">
+                        <div class="plugency-card-header">
+                            <h3>Third-party scripts</h3>
+                            <div class="plugency-inline-actions wrap">
+                                <span class="plugency-badge neutral" data-role="third-party-meta">Scanning...</span>
+                                <button class="plugency-button ghost" type="button" data-action="export-third-report">Export</button>
+                                <button class="plugency-button ghost" type="button" data-action="apply-facades">Apply facades</button>
+                            </div>
+                        </div>
+                        <p class="plugency-small">Inventory, performance impact, privacy score, and load-strategy suggestions for external scripts.</p>
+                        <h4>Performance & privacy</h4>
+                        <div class="plugency-list" data-role="third-party-list">
+                            <div class="plugency-list-item">
+                                <span class="plugency-source">Collecting external scripts...</span>
+                            </div>
+                        </div>
+                        <h4>Load strategy</h4>
+                        <div class="plugency-list" data-role="third-party-strategy">
+                            <div class="plugency-list-item">
+                                <span class="plugency-source">No strategy suggested yet.</span>
+                            </div>
+                        </div>
+                    </div>
                 </div>
                 <div class="plugency-card">
                     <div class="plugency-card-header">
@@ -1745,6 +3506,35 @@ function plugency_dev_help_render(): void
                         <div class="plugency-list-item">
                             <span class="plugency-source">Inspecting scripts...</span>
                         </div>
+                    </div>
+                </div>
+                <div class="plugency-card" data-role="bundle-analyzer-card">
+                    <div class="plugency-card-header">
+                        <h3>JS Bundle Analysis</h3>
+                        <div class="plugency-inline-actions wrap">
+                            <span class="plugency-badge neutral" data-role="bundle-analyzer-meta">Scanning...</span>
+                            <button class="plugency-button ghost" type="button" data-action="export-bundle-report">Export</button>
+                        </div>
+                    </div>
+                    <p class="plugency-small">Treemap of script composition, duplicate detection, blocking flags, and size-saving estimates.</p>
+                    <div class="plugency-chart" data-role="bundle-treemap-wrapper">
+                        <canvas width="520" height="160" data-role="bundle-treemap"></canvas>
+                    </div>
+                    <h4>Findings</h4>
+                    <div class="plugency-list" data-role="bundle-findings">
+                        <div class="plugency-list-item">
+                            <span class="plugency-source">Gathering bundle signals...</span>
+                        </div>
+                    </div>
+                    <h4>Duplicates & unused code</h4>
+                    <div class="plugency-list" data-role="bundle-duplicates">
+                        <div class="plugency-list-item">
+                            <span class="plugency-source">No data yet.</span>
+                        </div>
+                    </div>
+                    <h4>Dependency graph</h4>
+                    <div class="plugency-pre compact" data-role="bundle-deps">
+                        <pre>Building dependency view...</pre>
                     </div>
                 </div>
                 <div class="plugency-grid two">
@@ -1872,6 +3662,22 @@ function plugency_dev_help_render(): void
                             <span>Convert to WebP</span>
                         </label>
                         <label class="plugency-check">
+                            <input type="checkbox" data-option="convert_avif" checked>
+                            <span>Convert to AVIF</span>
+                        </label>
+                        <label class="plugency-check">
+                            <input type="checkbox" data-option="generate_srcset" checked>
+                            <span>Generate responsive srcset</span>
+                        </label>
+                        <label class="plugency-check">
+                            <input type="checkbox" data-option="add_lqip" checked>
+                            <span>Add blur-up/LQIP placeholders</span>
+                        </label>
+                        <label class="plugency-check">
+                            <input type="checkbox" data-option="lazy_fallback" checked>
+                            <span>Lazy load with IntersectionObserver fallback</span>
+                        </label>
+                        <label class="plugency-check">
                             <input type="checkbox" data-option="update_db">
                             <span>Automatic update in the database</span>
                         </label>
@@ -1883,13 +3689,109 @@ function plugency_dev_help_render(): void
                             <input type="checkbox" data-option="lossless">
                             <span>Lossless optimization (higher quality)</span>
                         </label>
+                        <label class="plugency-check">
+                            <input type="checkbox" data-option="backup_originals" checked>
+                            <span>Create backups before writing optimized files</span>
+                        </label>
+                        <label class="plugency-check">
+                            <input type="checkbox" data-option="detect_focal_point" checked>
+                            <span>Auto-detect focal point for art direction crops</span>
+                        </label>
+                        <p class="plugency-small">Art direction breakpoints: <strong data-role="optimizer-breakpoints">480 / 768 / 1200</strong></p>
                         <p class="plugency-small" data-role="optimizer-estimate"></p>
+                        <div class="plugency-progress" data-role="optimizer-progress" style="display:none;">
+                            <div class="plugency-progress-bar" data-role="optimizer-progress-bar" style="width:0%;"></div>
+                            <span class="plugency-progress-label" data-role="optimizer-progress-label"></span>
+                        </div>
                         <div class="plugency-inline-actions wrap">
                             <button type="button" class="plugency-button solid" data-action="start-image-optimization">Proceed &amp; download</button>
+                            <button type="button" class="plugency-button ghost" data-action="start-bulk-optimization">Run full pipeline</button>
+                            <button type="button" class="plugency-button ghost" data-action="rollback-optimization" disabled>Rollback last run</button>
                             <a class="plugency-button ghost" href="#" target="_blank" rel="noopener" data-role="optimizer-download" style="display:none;">Download optimized bundle</a>
                         </div>
+                        <div class="plugency-before-after">
+                            <input type="range" min="0" max="100" value="50" data-role="optimizer-slider">
+                            <div class="plugency-before-after-images">
+                                <img data-role="optimizer-before" alt="Before" />
+                                <img data-role="optimizer-after" alt="After" />
+                            </div>
+                        </div>
+                        <p class="plugency-small" data-role="optimizer-lighthouse">Estimated Lighthouse improvement: -</p>
                         <p class="plugency-status" data-role="optimizer-status"></p>
                         <div class="plugency-pre compact" data-role="optimizer-results" style="display:none;"></div>
+                    </div>
+                </div>
+                <div class="plugency-card" data-role="heartbeat-card">
+                    <div class="plugency-card-header">
+                        <h3>Heartbeat monitor</h3>
+                        <div class="plugency-inline-actions wrap">
+                            <span class="plugency-badge neutral" data-role="heartbeat-meta">Idle</span>
+                            <button class="plugency-button ghost" type="button" data-action="apply-heartbeat-recommended">Apply recommended</button>
+                            <button class="plugency-button ghost" type="button" data-action="save-heartbeat-settings">Save</button>
+                        </div>
+                    </div>
+                    <p class="plugency-small">Tracks WordPress Heartbeat frequency, payloads, and plugins using it. Tune per-page intervals and measure server load savings.</p>
+                    <div class="plugency-grid two">
+                        <div>
+                            <h4>Timeline</h4>
+                            <div class="plugency-list" data-role="heartbeat-timeline">
+                                <div class="plugency-list-item">
+                                    <span class="plugency-source">Waiting for heartbeat traffic...</span>
+                                </div>
+                            </div>
+                            <div class="plugency-inline-actions wrap">
+                                <button class="plugency-button ghost" type="button" data-action="start-heartbeat-test">Start A/B test</button>
+                                <button class="plugency-button ghost" type="button" data-action="stop-heartbeat-test">Stop A/B test</button>
+                            </div>
+                        </div>
+                        <div>
+                            <h4>Controls</h4>
+                            <div class="plugency-grid two">
+                                <label class="plugency-inline-input">
+                                    <span>Frontend interval (s)</span>
+                                    <input type="number" min="1" data-heartbeat-key="frontend" value="60">
+                                </label>
+                                <label class="plugency-inline-input">
+                                    <span>Admin interval (s)</span>
+                                    <input type="number" min="1" data-heartbeat-key="admin" value="30">
+                                </label>
+                                <label class="plugency-inline-input">
+                                    <span>Post edit interval (s)</span>
+                                    <input type="number" min="1" data-heartbeat-key="post_edit" value="15">
+                                </label>
+                                <label class="plugency-inline-input">
+                                    <span>Disable dashboard</span>
+                                    <select data-heartbeat-toggle="disable_dashboard">
+                                        <option value="1">Yes</option>
+                                        <option value="0">No</option>
+                                    </select>
+                                </label>
+                                <label class="plugency-inline-input">
+                                    <span>Disable list screens</span>
+                                    <select data-heartbeat-toggle="disable_list_screens">
+                                        <option value="1">Yes</option>
+                                        <option value="0">No</option>
+                                    </select>
+                                </label>
+                                <label class="plugency-inline-input">
+                                    <span>A/B Variant A (s)</span>
+                                    <input type="number" min="1" data-heartbeat-ab="variant_a" value="30">
+                                </label>
+                                <label class="plugency-inline-input">
+                                    <span>A/B Variant B (s)</span>
+                                    <input type="number" min="1" data-heartbeat-ab="variant_b" value="60">
+                                </label>
+                            </div>
+                            <div class="plugency-pre compact" data-role="heartbeat-impact">
+                                <pre>Calculating server impact...</pre>
+                            </div>
+                            <h4>Plugin usage</h4>
+                            <div class="plugency-list" data-role="heartbeat-usage">
+                                <div class="plugency-list-item">
+                                    <span class="plugency-source">No plugin signals yet.</span>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -1922,6 +3824,74 @@ function plugency_dev_help_render(): void
                             </div>
                         </div>
                     <?php endforeach; ?>
+                    <div class="plugency-card" data-role="header-audit-card">
+                        <div class="plugency-card-header">
+                            <h3>Response header audit</h3>
+                            <div class="plugency-inline-actions wrap">
+                                <span class="plugency-badge neutral" data-role="header-score">Score: --</span>
+                                <button class="plugency-button ghost" type="button" data-action="run-header-audit">Re-run</button>
+                                <button class="plugency-button ghost" type="button" data-action="apply-security-headers">One-click secure</button>
+                            </div>
+                        </div>
+                        <p class="plugency-small">Uses the live request headers above plus current response headers to score security, cache, compression, and CORS posture.</p>
+                        <div class="plugency-grid two">
+                            <div>
+                                <h4>Scorecard</h4>
+                                <ul class="plugency-meta" data-role="header-scorecard">
+                                    <li><span>Security</span><strong data-role="header-score-security">-</strong></li>
+                                    <li><span>Cache policy</span><strong data-role="header-score-cache">-</strong></li>
+                                    <li><span>CORS</span><strong data-role="header-score-cors">-</strong></li>
+                                    <li><span>Compression</span><strong data-role="header-score-compress">-</strong></li>
+                                    <li><span>Disclosure</span><strong data-role="header-score-info">-</strong></li>
+                                </ul>
+                                <div class="plugency-list" data-role="header-issues">
+                                    <div class="plugency-list-item">
+                                        <span class="plugency-source">Waiting for audit...</span>
+                                    </div>
+                                </div>
+                                <div class="plugency-inline-actions wrap">
+                                    <button class="plugency-button ghost" type="button" data-action="export-header-report">Export</button>
+                                    <button class="plugency-button ghost" type="button" data-action="save-header-policy">Save current headers</button>
+                                </div>
+                            </div>
+                            <div>
+                                <h4>Config generator</h4>
+                                <div class="plugency-pre compact" data-role="header-config-htaccess">
+                                    <pre>Generating .htaccess snippet...</pre>
+                                </div>
+                                <div class="plugency-pre compact" data-role="header-config-nginx">
+                                    <pre>Generating Nginx snippet...</pre>
+                                </div>
+                                <div class="plugency-pre compact" data-role="header-config-php">
+                                    <pre>Generating wp_head/wp_headers snippet...</pre>
+                                </div>
+                                <div class="plugency-inline-actions wrap">
+                                    <button class="plugency-button ghost" type="button" data-action="copy-header-htaccess">Copy .htaccess</button>
+                                    <button class="plugency-button ghost" type="button" data-action="copy-header-nginx">Copy Nginx</button>
+                                    <button class="plugency-button ghost" type="button" data-action="copy-header-php">Copy PHP</button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="plugency-grid two">
+                            <div>
+                                <h4>History & change tracking</h4>
+                                <div class="plugency-list" data-role="header-history">
+                                    <div class="plugency-list-item">
+                                        <span class="plugency-source">No history yet.</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div>
+                                <h4>Live checks</h4>
+                                <div class="plugency-pre compact" data-role="header-summary">
+                                    <pre>Checking cache, redundancy, and conflicts...</pre>
+                                </div>
+                                <div class="plugency-pre compact" data-role="header-cors">
+                                    <pre>Testing CORS and compression...</pre>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -1945,29 +3915,166 @@ function plugency_dev_help_render(): void
                     </div>
                 </div>
                 <div class="plugency-grid two">
-                    <div class="plugency-card">
-                        <div class="plugency-card-header">
-                            <h3>Active Plugins</h3>
+                <div class="plugency-card">
+                    <div class="plugency-card-header">
+                        <h3>Active Plugins</h3>
+                    </div>
+                    <div class="plugency-pre">
+                        <?php plugency_dev_help_print_pre($snapshot['context']['plugins']); ?>
+                    </div>
+                </div>
+                <div class="plugency-card">
+                    <div class="plugency-card-header">
+                        <h3>MU Plugins</h3>
+                    </div>
+                    <div class="plugency-pre">
+                        <?php plugency_dev_help_print_pre($snapshot['context']['mu_plugins']); ?>
+                    </div>
+                </div>
+            </div>
+                <div class="plugency-card" data-role="plugin-conflict-card">
+                    <div class="plugency-card-header">
+                        <h3>Plugin conflicts</h3>
+                        <div class="plugency-inline-actions wrap">
+                            <span class="plugency-badge neutral" data-role="plugin-conflict-meta">Scanning...</span>
+                        <button class="plugency-button ghost" type="button" data-action="export-plugin-conflicts">Export</button>
+                    </div>
+                </div>
+                <p class="plugency-small">Detects JS/CSS conflicts, duplicate libraries, and performance impact by plugin.</p>
+                <div class="plugency-grid two">
+                    <div>
+                        <h4>Warnings</h4>
+                        <div class="plugency-list" data-role="plugin-conflict-warnings">
+                            <div class="plugency-list-item">
+                                <span class="plugency-source">Collecting signals...</span>
+                            </div>
                         </div>
-                        <div class="plugency-pre">
-                            <?php plugency_dev_help_print_pre($snapshot['context']['plugins']); ?>
+                        <h4>Duplicate libraries / blocking assets</h4>
+                        <div class="plugency-list" data-role="plugin-duplicate-list">
+                            <div class="plugency-list-item">
+                                <span class="plugency-source">No data yet.</span>
+                            </div>
                         </div>
                     </div>
-                    <div class="plugency-card">
-                        <div class="plugency-card-header">
-                            <h3>MU Plugins</h3>
+                    <div>
+                        <h4>Console / CSS conflicts</h4>
+                        <div class="plugency-list" data-role="plugin-console-list">
+                            <div class="plugency-list-item">
+                                <span class="plugency-source">Monitoring console errors...</span>
+                            </div>
                         </div>
-                        <div class="plugency-pre">
-                            <?php plugency_dev_help_print_pre($snapshot['context']['mu_plugins']); ?>
+                        <div class="plugency-list" data-role="plugin-css-conflicts">
+                            <div class="plugency-list-item">
+                                <span class="plugency-source">Scanning stylesheets...</span>
+                            </div>
+                        </div>
+                        <h4>Compatibility matrix</h4>
+                        <div class="plugency-pre compact" data-role="plugin-matrix">
+                            <pre>Building matrix...</pre>
+                        </div>
+                    </div>
+                </div>
+                <div class="plugency-card" data-role="content-model-card">
+                    <div class="plugency-card-header">
+                        <h3>Content models (CPT & Taxonomies)</h3>
+                        <div class="plugency-inline-actions wrap">
+                            <span class="plugency-badge neutral" data-role="content-model-meta">Inventorying...</span>
+                            <button class="plugency-button ghost" type="button" data-action="cleanup-unused-cpts">Cleanup unused</button>
+                            <button class="plugency-button ghost" type="button" data-action="export-content-models">Export</button>
+                        </div>
+                    </div>
+                    <p class="plugency-small">Lists custom post types and taxonomies with registrar, counts, REST/rewrite exposure, conflicts, and cleanup suggestions.</p>
+                    <div class="plugency-grid two">
+                        <div>
+                            <h4>Post types</h4>
+                            <div class="plugency-list" data-role="content-model-cpts">
+                                <div class="plugency-list-item">
+                                    <span class="plugency-source">Gathering CPTs...</span>
+                                </div>
+                            </div>
+                            <h4>Taxonomies</h4>
+                            <div class="plugency-list" data-role="content-model-taxes">
+                                <div class="plugency-list-item">
+                                    <span class="plugency-source">Gathering taxonomies...</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div>
+                            <h4>Conflicts & performance</h4>
+                            <div class="plugency-pre compact" data-role="content-model-conflicts">
+                                <pre>Checking rewrite conflicts and registrations...</pre>
+                            </div>
+                            <h4>Recommendations</h4>
+                            <div class="plugency-list" data-role="content-model-recos">
+                                <div class="plugency-list-item">
+                                    <span class="plugency-source">Evaluating...</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="plugency-card">
+                <div class="plugency-card-header">
+                    <h3>Cron (next events)</h3>
+                </div>
+                <div class="plugency-pre">
+                        <?php plugency_dev_help_print_pre($snapshot['context']['cron']); ?>
+                    </div>
+                </div>
+            </div>
+
+            <div class="plugency-section" data-section="api">
+                <div class="plugency-card">
+                    <div class="plugency-card-header">
+                        <h3>API requests</h3>
+                        <div class="plugency-inline-actions wrap">
+                            <span class="plugency-badge neutral" data-role="api-status">Idle</span>
+                            <button class="plugency-button ghost" type="button" data-action="export-api-log" disabled>Export</button>
+                            <button class="plugency-button ghost" type="button" data-action="clear-api-log">Clear</button>
+                            <button class="plugency-button ghost" type="button" data-action="toggle-mock-api">Mock off</button>
+                        </div>
+                    </div>
+                    <div class="plugency-grid two">
+                        <label class="plugency-inline-input">
+                            <span>Endpoint</span>
+                            <input type="text" data-role="api-filter-endpoint" placeholder="/wp-json/">
+                        </label>
+                        <label class="plugency-inline-input">
+                            <span>Method</span>
+                            <input type="text" data-role="api-filter-method" placeholder="GET/POST">
+                        </label>
+                        <label class="plugency-inline-input">
+                            <span>Status</span>
+                            <input type="text" data-role="api-filter-status" placeholder="200, 4xx">
+                        </label>
+                        <label class="plugency-inline-input">
+                            <span>Response time ≥ ms</span>
+                            <input type="number" min="0" data-role="api-filter-latency" placeholder="500">
+                        </label>
+                    </div>
+                    <div class="plugency-chart" data-role="api-waterfall-wrapper">
+                        <canvas width="520" height="140" data-role="api-waterfall"></canvas>
+                    </div>
+                    <h4>Requests</h4>
+                    <div class="plugency-list" data-role="api-list">
+                        <div class="plugency-list-item">
+                            <span class="plugency-source">Waiting for traffic...</span>
                         </div>
                     </div>
                 </div>
                 <div class="plugency-card">
                     <div class="plugency-card-header">
-                        <h3>Cron (next events)</h3>
+                        <h3>Request details</h3>
+                        <span class="plugency-badge neutral" data-role="api-detail-badge">Select a request</span>
                     </div>
-                    <div class="plugency-pre">
-                        <?php plugency_dev_help_print_pre($snapshot['context']['cron']); ?>
+                    <div class="plugency-pre compact" data-role="api-detail">
+                        <pre>Select a request to view payloads, headers, timing, auth, and cURL.</pre>
+                    </div>
+                    <div class="plugency-inline-actions wrap">
+                        <button class="plugency-button ghost" type="button" data-action="copy-api-curl" disabled>Copy cURL</button>
+                        <button class="plugency-button ghost" type="button" data-action="replay-api" disabled>Replay</button>
+                        <button class="plugency-button ghost" type="button" data-action="mock-api-response" disabled>Mock response</button>
                     </div>
                 </div>
             </div>
@@ -2054,6 +4161,94 @@ function plugency_dev_help_render(): void
                                                     echo '<pre>' . esc_html('No plan available.') . '</pre>';
                                                 }
                                                 ?>
+                                            </div>
+                                        </div>
+                                        <div class="plugency-card flat" data-role="query-optimizer">
+                                            <div class="plugency-card-header">
+                                                <h4>Query optimizer</h4>
+                                                <div class="plugency-inline-actions wrap">
+                                                    <button class="plugency-button ghost" type="button" data-action="analyze-queries">Analyze queries</button>
+                                                    <button class="plugency-button ghost" type="button" data-action="export-query-report" disabled>Export report</button>
+                                                    <button class="plugency-button ghost" type="button" data-action="test-optimized-query" disabled>Test alternative</button>
+                                                </div>
+                                            </div>
+                                            <p class="plugency-small" data-role="query-optimizer-note">Identify N+1 patterns, index opportunities, missing FKs, and plan changes from SAVEQUERIES.</p>
+                                            <div class="plugency-chart" data-role="query-history-chart-wrapper">
+                                                <canvas width="520" height="120" data-role="query-history-chart"></canvas>
+                                            </div>
+                                            <h4>Recommendations</h4>
+                                            <div class="plugency-list" data-role="query-recommendations">
+                                                <div class="plugency-list-item">
+                                                    <span class="plugency-source">Run analysis to see optimization suggestions.</span>
+                                                </div>
+                                            </div>
+                                            <h4>Execution plans</h4>
+                                            <div class="plugency-table-wrapper">
+                                                <table class="plugency-table" data-role="query-plan-table">
+                                                    <thead>
+                                                        <tr>
+                                                            <th>Query</th>
+                                                            <th>Plan (before)</th>
+                                                            <th>Plan (after)</th>
+                                                            <th>Est. gain</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        <tr>
+                                                            <td colspan="4">No plans yet.</td>
+                                                        </tr>
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        </div>
+                                        <div class="plugency-card flat" data-role="transient-card">
+                                            <div class="plugency-card-header">
+                                                <h4>Transient cache</h4>
+                                                <div class="plugency-inline-actions wrap">
+                                                    <span class="plugency-badge neutral" data-role="transient-badge">Loading...</span>
+                                                    <button class="plugency-button ghost" type="button" data-action="cleanup-transients">Clean expired</button>
+                                                    <button class="plugency-button ghost" type="button" data-action="export-transients">Export</button>
+                                                </div>
+                                            </div>
+                                            <p class="plugency-small" data-role="transient-note">Active transients, expirations, orphaned entries, and space impact.</p>
+                                            <div class="plugency-grid two">
+                                                <label class="plugency-inline-input">
+                                                    <span>Search</span>
+                                                    <input type="text" data-role="transient-search" placeholder="transient name/source">
+                                                </label>
+                                                <div class="plugency-inline-input">
+                                                    <span class="plugency-small">Space used</span>
+                                                    <strong data-role="transient-space">-</strong>
+                                                </div>
+                                            </div>
+                                            <div class="plugency-chart" data-role="transient-chart-wrapper">
+                                                <canvas width="520" height="120" data-role="transient-chart"></canvas>
+                                            </div>
+                                            <h4>Inventory</h4>
+                                            <div class="plugency-table-wrapper">
+                                                <table class="plugency-table" data-role="transient-table">
+                                                    <thead>
+                                                        <tr>
+                                                            <th>Name</th>
+                                                            <th>Status</th>
+                                                            <th>Expires</th>
+                                                            <th>Size</th>
+                                                            <th>Source</th>
+                                                            <th>Type</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        <tr>
+                                                            <td colspan="6">Loading transients...</td>
+                                                        </tr>
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                            <h4>Recommendations</h4>
+                                            <div class="plugency-list" data-role="transient-recommendations">
+                                                <div class="plugency-list-item">
+                                                    <span class="plugency-source">Insights will appear after scan.</span>
+                                                </div>
                                             </div>
                                         </div>
                                     </div>
@@ -2235,6 +4430,37 @@ function plugency_dev_help_render(): void
                         </div>
                         <div id="plugencyHookTimeline" class="plugency-pre">
                             <?php plugency_dev_help_print_pre($hook_events); ?>
+                        </div>
+                    </div>
+                    <div class="plugency-card" data-role="coverage-card">
+                        <div class="plugency-card-header">
+                            <h3>Code coverage (runtime)</h3>
+                            <div class="plugency-inline-actions wrap">
+                                <span class="plugency-badge neutral" data-role="coverage-meta">Aggregated</span>
+                                <button class="plugency-button ghost" data-action="export-coverage">Export</button>
+                                <button class="plugency-button ghost" data-action="show-unused">Show unused</button>
+                            </div>
+                        </div>
+                        <p class="plugency-small">Function-level execution counts collected from hooks instrumentation in this environment.</p>
+                        <div class="plugency-grid two">
+                            <div class="plugency-chart" data-role="coverage-heatmap-wrapper">
+                                <canvas width="520" height="140" data-role="coverage-heatmap"></canvas>
+                            </div>
+                            <div class="plugency-pre compact" data-role="coverage-callgraph">
+                                <pre>Call graph builds as hooks run.</pre>
+                            </div>
+                        </div>
+                        <h4>Top executed functions</h4>
+                        <div class="plugency-list" data-role="coverage-top">
+                            <div class="plugency-list-item">
+                                <span class="plugency-source">Awaiting coverage data...</span>
+                            </div>
+                        </div>
+                        <h4>Unused functions (observed)</h4>
+                        <div class="plugency-list" data-role="coverage-unused">
+                            <div class="plugency-list-item">
+                                <span class="plugency-source">Not computed yet.</span>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -2453,6 +4679,180 @@ function plugency_dev_help_write_test_log_ajax(): void
 }
 
 add_action('wp_ajax_plugency_write_test_log', 'plugency_dev_help_write_test_log_ajax');
+
+function plugency_dev_help_delete_expired_transients(): array
+{
+    global $wpdb;
+    $now = time();
+    $tables = array($wpdb->options);
+    if (is_multisite()) {
+        $tables[] = $wpdb->sitemeta;
+    }
+    $deleted = 0;
+    foreach ($tables as $table) {
+        $col_name = $table === $wpdb->sitemeta ? 'meta_key' : 'option_name';
+        $col_value = $table === $wpdb->sitemeta ? 'meta_value' : 'option_value';
+        $deleted += (int) $wpdb->query(
+            $wpdb->prepare(
+                "DELETE FROM {$table} WHERE ({$col_name} LIKE %s OR {$col_name} LIKE %s) AND {$col_value} < %d",
+                $wpdb->esc_like('_transient_timeout_') . '%',
+                $wpdb->esc_like('_site_transient_timeout_') . '%',
+                $now
+            )
+        );
+    }
+    return array('deleted' => $deleted);
+}
+
+function plugency_dev_help_delete_expired_transients_ajax(): void
+{
+    plugency_dev_help_verify_ajax();
+    $result = plugency_dev_help_delete_expired_transients();
+    wp_send_json_success($result);
+}
+
+add_action('wp_ajax_plugency_delete_expired_transients', 'plugency_dev_help_delete_expired_transients_ajax');
+
+function plugency_dev_help_get_budgets_ajax(): void
+{
+    plugency_dev_help_verify_ajax();
+    wp_send_json_success(plugency_dev_help_get_budgets());
+}
+
+add_action('wp_ajax_plugency_get_budgets', 'plugency_dev_help_get_budgets_ajax');
+
+function plugency_dev_help_save_budgets_ajax(): void
+{
+    plugency_dev_help_verify_ajax();
+    $raw = isset($_POST['budgets']) ? wp_unslash((string) $_POST['budgets']) : '';
+    $decoded = json_decode($raw, true);
+    $budgets = is_array($decoded) ? $decoded : array();
+    $saved = plugency_dev_help_save_budgets($budgets);
+    wp_send_json_success($saved);
+}
+
+add_action('wp_ajax_plugency_save_budgets', 'plugency_dev_help_save_budgets_ajax');
+
+function plugency_dev_help_log_budget_violation_ajax(): void
+{
+    plugency_dev_help_verify_ajax();
+    $metric = isset($_POST['metric']) ? sanitize_text_field(wp_unslash((string) $_POST['metric'])) : '';
+    $actual = isset($_POST['actual']) ? wp_unslash((string) $_POST['actual']) : '';
+    $budget = isset($_POST['budget']) ? wp_unslash((string) $_POST['budget']) : '';
+    if ($metric !== '') {
+        plugency_dev_help_log_budget_violation($metric, $actual, $budget);
+    }
+    wp_send_json_success(array('logged' => $metric !== ''));
+}
+
+add_action('wp_ajax_plugency_log_budget_violation', 'plugency_dev_help_log_budget_violation_ajax');
+
+function plugency_dev_help_get_perf_tests_ajax(): void
+{
+    plugency_dev_help_verify_ajax();
+    wp_send_json_success(plugency_dev_help_get_perf_tests());
+}
+
+add_action('wp_ajax_plugency_get_perf_tests', 'plugency_dev_help_get_perf_tests_ajax');
+
+function plugency_dev_help_save_perf_tests_ajax(): void
+{
+    plugency_dev_help_verify_ajax();
+    $raw = isset($_POST['data']) ? wp_unslash((string) $_POST['data']) : '';
+    $decoded = json_decode($raw, true);
+    $saved = plugency_dev_help_save_perf_tests(is_array($decoded) ? $decoded : array());
+    wp_send_json_success($saved);
+}
+
+add_action('wp_ajax_plugency_save_perf_tests', 'plugency_dev_help_save_perf_tests_ajax');
+
+function plugency_dev_help_record_perf_result_ajax(): void
+{
+    plugency_dev_help_verify_ajax();
+    $raw = isset($_POST['result']) ? wp_unslash((string) $_POST['result']) : '';
+    $decoded = json_decode($raw, true);
+    $saved = plugency_dev_help_record_perf_result(is_array($decoded) ? $decoded : array());
+    wp_send_json_success($saved);
+}
+
+add_action('wp_ajax_plugency_record_perf_result', 'plugency_dev_help_record_perf_result_ajax');
+
+function plugency_dev_help_apply_security_headers_ajax(): void
+{
+    plugency_dev_help_verify_ajax();
+    $policy = plugency_dev_help_save_security_headers(plugency_dev_help_default_security_headers(), true, 'recommended');
+    wp_send_json_success(array('policy' => $policy));
+}
+
+add_action('wp_ajax_plugency_apply_security_headers', 'plugency_dev_help_apply_security_headers_ajax');
+
+function plugency_dev_help_save_security_headers_ajax(): void
+{
+    plugency_dev_help_verify_ajax();
+    $raw = isset($_POST['headers']) ? wp_unslash((string) $_POST['headers']) : '';
+    $decoded = json_decode($raw, true);
+    $headers = is_array($decoded) ? $decoded : array();
+    $enable_raw = isset($_POST['enable']) ? wp_unslash((string) $_POST['enable']) : '1';
+    $enabled = !in_array(strtolower($enable_raw), array('0', 'false', 'off'), true);
+    $policy = plugency_dev_help_save_security_headers($headers, $enabled, 'manual');
+    wp_send_json_success(array('policy' => $policy));
+}
+
+add_action('wp_ajax_plugency_save_security_headers', 'plugency_dev_help_save_security_headers_ajax');
+
+function plugency_dev_help_clear_opcache_ajax(): void
+{
+    plugency_dev_help_verify_ajax();
+    if (!function_exists('opcache_reset')) {
+        wp_send_json_error('OPcache not available', 400);
+    }
+    $result = @opcache_reset();
+    wp_send_json_success(array('cleared' => (bool) $result));
+}
+
+add_action('wp_ajax_plugency_clear_opcache', 'plugency_dev_help_clear_opcache_ajax');
+
+function plugency_dev_help_cleanup_unused_cpts_ajax(): void
+{
+    plugency_dev_help_verify_ajax();
+    $names = isset($_POST['names']) ? wp_unslash((string) $_POST['names']) : '';
+    $list = array_filter(array_map('sanitize_key', explode(',', $names)));
+    $deleted = array();
+    foreach ($list as $name) {
+        // Cleanup posts and rewrite rules; leave actual registration to code owner.
+        $posts = get_posts(array('post_type' => $name, 'post_status' => 'any', 'numberposts' => -1, 'fields' => 'ids'));
+        foreach ($posts as $post_id) {
+            wp_delete_post($post_id, true);
+        }
+        $deleted[] = array('post_type' => $name, 'deleted_posts' => count($posts));
+    }
+    flush_rewrite_rules(false);
+    wp_send_json_success(array('cleanup' => $deleted));
+}
+
+add_action('wp_ajax_plugency_cleanup_unused_cpts', 'plugency_dev_help_cleanup_unused_cpts_ajax');
+
+function plugency_dev_help_save_heartbeat_settings_ajax(): void
+{
+    plugency_dev_help_verify_ajax();
+    $raw = isset($_POST['settings']) ? wp_unslash((string) $_POST['settings']) : '';
+    $decoded = json_decode($raw, true);
+    $settings = is_array($decoded) ? $decoded : array();
+    $saved = plugency_dev_help_save_heartbeat_settings($settings);
+    wp_send_json_success(array('settings' => $saved));
+}
+
+add_action('wp_ajax_plugency_save_heartbeat_settings', 'plugency_dev_help_save_heartbeat_settings_ajax');
+
+function plugency_dev_help_apply_heartbeat_recommendations_ajax(): void
+{
+    plugency_dev_help_verify_ajax();
+    $settings = plugency_dev_help_recommended_heartbeat_settings();
+    $saved = plugency_dev_help_save_heartbeat_settings($settings);
+    wp_send_json_success(array('settings' => $saved));
+}
+
+add_action('wp_ajax_plugency_apply_heartbeat_recommendations', 'plugency_dev_help_apply_heartbeat_recommendations_ajax');
 
 /**
  * Recursively replace URLs in meta values while preserving types/serialization.

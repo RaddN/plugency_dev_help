@@ -977,6 +977,103 @@
   max-height: 340px;
   overflow: auto;
 }
+.plugency-budget-row {
+  flex-direction: column;
+  align-items: flex-start;
+}
+.plugency-budget-bar {
+  width: 100%;
+  height: 8px;
+  background: #0b1324;
+  border: 1px solid #1f2937;
+  border-radius: 999px;
+  overflow: hidden;
+}
+.plugency-budget-bar-fill {
+  height: 100%;
+  display: block;
+  background: linear-gradient(90deg, #22c55e, #16a34a);
+  color: #0b1324;
+  font-size: 10px;
+  font-weight: 700;
+  text-align: right;
+  padding-right: 6px;
+  line-height: 8px;
+}
+.plugency-budget-bar-fill.warn {
+  background: linear-gradient(90deg, #facc15, #f59e0b);
+}
+.plugency-budget-bar-fill.error {
+  background: linear-gradient(90deg, #f87171, #ef4444);
+}
+.plugency-chart {
+  margin: 10px 0;
+  background: #0d182b;
+  border: 1px solid #1f2937;
+  border-radius: 10px;
+  padding: 10px;
+}
+.plugency-chart canvas {
+  width: 100%;
+  display: block;
+  max-width: 100%;
+}
+.plugency-progress {
+  margin: 10px 0;
+  background: #0b1324;
+  border: 1px solid #1f2937;
+  border-radius: 10px;
+  position: relative;
+  height: 14px;
+  overflow: hidden;
+}
+.plugency-progress-bar {
+  height: 100%;
+  background: linear-gradient(90deg, #22c55e, #16a34a);
+  transition: width 0.2s ease;
+}
+.plugency-progress-label {
+  position: absolute;
+  top: -18px;
+  right: 0;
+  font-size: 11px;
+  color: #9ca3af;
+}
+.plugency-before-after {
+  position: relative;
+  margin: 14px 0;
+}
+.plugency-before-after input[type='range'] {
+  width: 100%;
+}
+.plugency-before-after-images {
+  position: relative;
+  width: 100%;
+  height: 200px;
+  overflow: hidden;
+  border: 1px solid #1f2937;
+  border-radius: 10px;
+  background: #0b1324;
+}
+.plugency-before-after-images img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.plugency-before-after-images img[data-role='optimizer-after'] {
+  clip-path: inset(0 0 0 50%);
+  transition: clip-path 0.12s ease;
+}
+.plugency-pre.compact pre {
+  max-height: 240px;
+}
+.plugency-highlight {
+  outline: 3px solid #fbbf24 !important;
+  outline-offset: 2px;
+  transition: outline 0.2s ease;
+}
 
 .plugency-list-item {
   display: flex;
@@ -1144,6 +1241,15 @@
   font-size: 12px;
   color: #9ca3af;
   margin: 6px 0 12px;
+}
+.plugency-small.warn {
+  color: #fbbf24;
+}
+.plugency-small.error {
+  color: #f87171;
+}
+.plugency-small.success {
+  color: #34d399;
 }
 
 .plugency-ellipsis {
