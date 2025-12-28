@@ -4490,7 +4490,7 @@ function plugency_dev_help_render(): void
                             </label>
                             <label class="plugency-inline-input">
                                 <span>Search</span>
-                                <input type="text" data-role="log-query" placeholder="Filter log (case-insensitive)">
+                                <input type="text" data-role="log-query" placeholder="Filter log (case-insensitive)" style="background: #0b1324; width: 200px;">
                             </label>
                         </div>
                     </div>

@@ -516,6 +516,8 @@
   color: #d1d5db;
   white-space: pre-wrap;
   word-break: break-word;
+  background: #0b1324;
+  border-radius: 10px;
 }
 .plugency-pre.compact {
   max-height: 180px;
@@ -1043,7 +1045,7 @@
   position: relative;
   margin: 14px 0;
 }
-.plugency-before-after input[type='range'] {
+.plugency-before-after input[type="range"] {
   width: 100%;
 }
 .plugency-before-after-images {
@@ -1062,7 +1064,7 @@
   height: 100%;
   object-fit: contain;
 }
-.plugency-before-after-images img[data-role='optimizer-after'] {
+.plugency-before-after-images img[data-role="optimizer-after"] {
   clip-path: inset(0 0 0 50%);
   transition: clip-path 0.12s ease;
 }
@@ -1089,13 +1091,14 @@
   font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
   font-size: 12px;
   color: #e5e7eb;
-  word-break: break-all;
   flex: 1;
 }
 
 .plugency-source {
   font-size: 12px;
   color: #9ca3af;
+  width: 70%;
+  word-break: break-all;
 }
 
 .plugency-pill {
