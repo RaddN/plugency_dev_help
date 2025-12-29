@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Plugency Dev Help
  * Description: Developer-first debugging surface for quick insight into the current request. Shows included PHP files, assets, requests, database queries, and lets you manage debug logging (admin only).
- * Version: 1.1.6
+ * Version: 1.1.7
  * Author: Raihan Hossain
  */
 
@@ -11,7 +11,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-define('PLUGENCY_DEV_HELP_VERSION', '1.1.6');
+define('PLUGENCY_DEV_HELP_VERSION', '1.1.7');
 
 /**
  * Guard utility to centralize capability checks.
@@ -19,6 +19,27 @@ define('PLUGENCY_DEV_HELP_VERSION', '1.1.6');
 function plugency_dev_help_can_view(): bool
 {
     return is_user_logged_in() && current_user_can('manage_options');
+}
+
+function plugency_dev_help_is_local_site(): bool
+{
+    $env = function_exists('wp_get_environment_type') ? wp_get_environment_type() : '';
+    if ($env === 'local') {
+        return true;
+    }
+
+    $host = wp_parse_url(home_url(), PHP_URL_HOST);
+    if ($host) {
+        $host = strtolower((string) $host);
+        if (in_array($host, array('localhost', '127.0.0.1', '::1', '[::1]'), true)) {
+            return true;
+        }
+        if (preg_match('/\.(local|test)$/', $host)) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 function plugency_dev_help_default_budgets(): array
@@ -865,8 +886,51 @@ function plugency_dev_help_enqueue_assets(): void
     );
 }
 
+function plugency_dev_help_plugin_vscode_action(array $actions, string $plugin_file, array $plugin_data, string $context): array
+{
+    if (!plugency_dev_help_is_local_site()) {
+        return $actions;
+    }
+
+    if (!current_user_can('activate_plugins')) {
+        return $actions;
+    }
+
+    $absolute = trailingslashit(WP_PLUGIN_DIR) . ltrim($plugin_file, '/');
+    if (!file_exists($absolute)) {
+        return $actions;
+    }
+
+    $plugin_dir = plugin_dir_path($absolute);
+    $plugin_dir = $plugin_dir !== '' ? $plugin_dir : dirname($absolute);
+    $normalized = untrailingslashit(wp_normalize_path($plugin_dir));
+    $prefix = '';
+    $path_body = $normalized;
+
+    if (strpos($normalized, ':') === 1) {
+        $prefix = substr($normalized, 0, 3);
+        $path_body = substr($normalized, 3);
+    } elseif (strpos($normalized, '/') === 0) {
+        $prefix = '/';
+        $path_body = ltrim($normalized, '/');
+    }
+
+    $encoded = $path_body === '' ? '' : implode('/', array_map('rawurlencode', explode('/', $path_body)));
+    $vscode_url = 'vscode://file/' . $prefix . $encoded;
+
+    $actions['plugency_open_vscode'] = sprintf(
+        '<a href="%s" class="plugency-open-vscode">%s</a>',
+        esc_attr($vscode_url),
+        esc_html__('Open with VS Code', 'plugency-dev-help')
+    );
+
+    return $actions;
+}
+
 add_action('wp_enqueue_scripts', 'plugency_dev_help_enqueue_assets');
 add_action('admin_enqueue_scripts', 'plugency_dev_help_enqueue_assets');
+add_filter('plugin_action_links', 'plugency_dev_help_plugin_vscode_action', 10, 4);
+add_filter('network_admin_plugin_action_links', 'plugency_dev_help_plugin_vscode_action', 10, 4);
 
 add_action('init', static function () {
     $tests = plugency_dev_help_get_perf_tests();
