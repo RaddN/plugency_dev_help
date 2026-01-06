@@ -36,6 +36,23 @@
         const optimizerBackdrop = panel ? panel.querySelector('[data-role="image-optimizer-backdrop"]') : null;
         const closeBtn = panel ? panel.querySelector('[data-action="close-panel"]') : null;
         const stateHome = state.homeUrl || '';
+        let bundleCard;
+        let bundleExportBtn;
+        let thirdGovCard;
+        let thirdGovExport;
+        let thirdGovFacade;
+        let a11yCard;
+        let a11yRunBtn;
+        let a11yFixBtn;
+        let a11yExportBtn;
+        let runA11yAudit;
+        let fixCommonA11y;
+        let exportA11yReport;
+        let getResourceEntries;
+        let summarizeThirdParty;
+        let analyzeBundles;
+        let exportBundleReport;
+        let lcpEntry = null;
 
         if (!launcher || !panel) {
             return;
@@ -1501,7 +1518,20 @@
         };
 
         const initSchemaTool = () => {
+            if (!performanceSection) return;
+            const schemaCard = performanceSection.querySelector('[data-role="schema-card"]');
             if (!schemaCard) return;
+            const schemaList = schemaCard.querySelector('[data-role="schema-list"]');
+            const schemaErrors = schemaCard.querySelector('[data-role="schema-errors"]');
+            const schemaEditor = schemaCard.querySelector('[data-role="schema-editor"]');
+            const schemaTemplateSelect = schemaCard.querySelector('[data-role="schema-template"]');
+            const schemaPreview = schemaCard.querySelector('[data-role="schema-preview"] pre') || schemaCard.querySelector('[data-role="schema-preview"]');
+            const schemaTemplatesPre = schemaCard.querySelector('[data-role="schema-templates"] pre') || schemaCard.querySelector('[data-role="schema-templates"]');
+            const schemaMeta = schemaCard.querySelector('[data-role="schema-meta"]');
+            const schemaValidateBtn = schemaCard.querySelector('[data-action="schema-validate"]');
+            const schemaExportBtn = schemaCard.querySelector('[data-action="schema-export"]');
+            const schemaApplyBtn = schemaCard.querySelector('[data-action="schema-apply-template"]');
+            const schemaPreviewBtn = schemaCard.querySelector('[data-action="schema-preview"]');
             const detectSchema = () => {
                 const scripts = Array.from(document.querySelectorAll('script[type="application/ld+json"]')) || [];
                 const found = [];
@@ -1678,7 +1708,19 @@
         };
 
         const initPwaTool = () => {
+            if (!performanceSection) return;
+            const pwaCard = performanceSection.querySelector('[data-role="pwa-card"]');
             if (!pwaCard) return;
+            const pwaMeta = pwaCard.querySelector('[data-role="pwa-meta"]');
+            const pwaSwStatus = pwaCard.querySelector('[data-role="pwa-sw-status"]');
+            const pwaCacheList = pwaCard.querySelector('[data-role="pwa-cache-list"]');
+            const pwaChecklist = pwaCard.querySelector('[data-role="pwa-checklist"]');
+            const pwaPush = pwaCard.querySelector('[data-role="pwa-push"] pre') || pwaCard.querySelector('[data-role="pwa-push"]');
+            const pwaInstall = pwaCard.querySelector('[data-role="pwa-install"] pre') || pwaCard.querySelector('[data-role="pwa-install"]');
+            const pwaRefreshBtn = pwaCard.querySelector('[data-action="pwa-refresh"]');
+            const pwaOfflineBtn = pwaCard.querySelector('[data-action="pwa-offline-toggle"]');
+            const pwaClearCacheBtn = pwaCard.querySelector('[data-action="pwa-clear-cache"]');
+            const pwaCheckUpdateBtn = pwaCard.querySelector('[data-action="pwa-check-updates"]');
             let offlineSimulated = false;
 
             const setMeta = (text, tone = 'neutral') => {
@@ -1894,7 +1936,17 @@
         };
 
         const initFontOptimizer = () => {
+            if (!performanceSection) return;
+            const fontOptCard = performanceSection.querySelector('[data-role="font-optimizer-card"]');
             if (!fontOptCard) return;
+            const fontOptList = fontOptCard.querySelector('[data-role="font-opt-list"]');
+            const fontOptStrategy = fontOptCard.querySelector('[data-role="font-opt-strategy"] pre') || fontOptCard.querySelector('[data-role="font-opt-strategy"]');
+            const fontOptRecos = fontOptCard.querySelector('[data-role="font-opt-recos"]');
+            const fontOptCode = fontOptCard.querySelector('[data-role="font-opt-code"] pre') || fontOptCard.querySelector('[data-role="font-opt-code"]');
+            const fontOptMeta = fontOptCard.querySelector('[data-role="font-opt-meta"]');
+            const fontOptSimBtn = fontOptCard.querySelector('[data-action="font-opt-simulate"]');
+            const fontOptApplyBtn = fontOptCard.querySelector('[data-action="font-opt-apply"]');
+            const fontOptExportBtn = fontOptCard.querySelector('[data-action="font-opt-export"]');
 
             const formatBytes = (bytes) => {
                 const num = Number(bytes) || 0;
@@ -3331,12 +3383,12 @@
             const perfLazyMeta = performanceSection.querySelector('[data-role="perf-lazy-meta"]');
             const perfConnList = performanceSection.querySelector('[data-role="perf-conn-list"]');
             const perfConnMeta = performanceSection.querySelector('[data-role="perf-conn-meta"]');
-            const thirdGovCard = performanceSection.querySelector('[data-role="third-party-governance"]');
+            thirdGovCard = performanceSection.querySelector('[data-role="third-party-governance"]');
             const thirdGovMeta = thirdGovCard ? thirdGovCard.querySelector('[data-role="third-party-meta"]') : null;
             const thirdGovList = thirdGovCard ? thirdGovCard.querySelector('[data-role="third-party-list"]') : null;
             const thirdGovStrategy = thirdGovCard ? thirdGovCard.querySelector('[data-role="third-party-strategy"]') : null;
-            const thirdGovExport = thirdGovCard ? thirdGovCard.querySelector('[data-action="export-third-report"]') : null;
-            const thirdGovFacade = thirdGovCard ? thirdGovCard.querySelector('[data-action="apply-facades"]') : null;
+            thirdGovExport = thirdGovCard ? thirdGovCard.querySelector('[data-action="export-third-report"]') : null;
+            thirdGovFacade = thirdGovCard ? thirdGovCard.querySelector('[data-action="apply-facades"]') : null;
             const perfPreloadBtn = performanceSection.querySelector('[data-action="preload-key-assets"]');
             const perfLazyBtn = performanceSection.querySelector('[data-action="lazyload-images"]');
             const perfPreconnectBtn = performanceSection.querySelector('[data-action="preconnect-hosts"]');
@@ -3371,20 +3423,20 @@
             const optimizerLighthouse = performanceSection.querySelector('[data-role="optimizer-lighthouse"]');
             const optimizerBulkBtn = performanceSection.querySelector('[data-action="start-bulk-optimization"]');
             const optimizerRollbackBtn = performanceSection.querySelector('[data-action="rollback-optimization"]');
-            const bundleCard = performanceSection.querySelector('[data-role="bundle-analyzer-card"]');
+            bundleCard = performanceSection.querySelector('[data-role="bundle-analyzer-card"]');
             const bundleMeta = bundleCard ? bundleCard.querySelector('[data-role="bundle-analyzer-meta"]') : null;
             const bundleTreemap = bundleCard ? bundleCard.querySelector('[data-role="bundle-treemap"]') : null;
             const bundleTreemapWrapper = bundleCard ? bundleCard.querySelector('[data-role="bundle-treemap-wrapper"]') : null;
             const bundleFindings = bundleCard ? bundleCard.querySelector('[data-role="bundle-findings"]') : null;
             const bundleDuplicates = bundleCard ? bundleCard.querySelector('[data-role="bundle-duplicates"]') : null;
             const bundleDeps = bundleCard ? bundleCard.querySelector('[data-role="bundle-deps"] pre') : null;
-            const bundleExportBtn = bundleCard ? bundleCard.querySelector('[data-action="export-bundle-report"]') : null;
-            const a11yCard = performanceSection.querySelector('[data-role="a11y-card"]');
+            bundleExportBtn = bundleCard ? bundleCard.querySelector('[data-action="export-bundle-report"]') : null;
+            a11yCard = performanceSection.querySelector('[data-role="a11y-card"]');
             const a11yIssues = a11yCard ? a11yCard.querySelector('[data-role="a11y-issues"]') : null;
             const a11yScoreBadge = a11yCard ? a11yCard.querySelector('[data-role="a11y-score"]') : null;
-            const a11yRunBtn = a11yCard ? a11yCard.querySelector('[data-action="run-a11y-audit"]') : null;
-            const a11yFixBtn = a11yCard ? a11yCard.querySelector('[data-action="fix-a11y-common"]') : null;
-            const a11yExportBtn = a11yCard ? a11yCard.querySelector('[data-action="export-a11y-report"]') : null;
+            a11yRunBtn = a11yCard ? a11yCard.querySelector('[data-action="run-a11y-audit"]') : null;
+            a11yFixBtn = a11yCard ? a11yCard.querySelector('[data-action="fix-a11y-common"]') : null;
+            a11yExportBtn = a11yCard ? a11yCard.querySelector('[data-action="export-a11y-report"]') : null;
             const formCard = performanceSection.querySelector('[data-role="form-ux-card"]');
             const formHeatmap = formCard ? formCard.querySelector('[data-role="form-heatmap"]') : null;
             const formFunnel = formCard ? formCard.querySelector('[data-role="form-funnel"]') : null;
@@ -3483,7 +3535,7 @@
 
             let collectedImages = [];
             let selectedImages = [];
-            let lcpEntry = null;
+            lcpEntry = null;
             let clsValue = 0;
             let firstInputDelay = null;
             let longTaskStats = { count: 0, total: 0 };
@@ -3966,7 +4018,7 @@
                 return match ? match[1] : 'unknown';
             };
 
-            const getResourceEntries = () => {
+            getResourceEntries = () => {
                 if (typeof performance === 'undefined' || !performance.getEntriesByType) {
                     return [];
                 }
@@ -4087,7 +4139,7 @@
                 return summary;
             };
 
-            const summarizeThirdParty = (entries) => {
+            summarizeThirdParty = (entries) => {
                 const host = window.location.host;
                 let count = 0;
                 let transfer = 0;
@@ -5186,7 +5238,7 @@
                 return slow.slice(0, 8);
             };
 
-            const analyzeBundles = (entries) => {
+            analyzeBundles = (entries) => {
                 const scripts = (entries || []).filter((e) => (e.initiatorType || '').toLowerCase() === 'script');
                 const bundles = scripts.map((e) => {
                     const size = e.transferSize || e.decodedBodySize || e.encodedBodySize || 0;
@@ -5315,7 +5367,7 @@
                 bundleDeps.textContent = lines.length ? lines.join('\n') : 'No dependency edges detected.';
             };
 
-            const exportBundleReport = (data) => {
+            exportBundleReport = (data) => {
                 const nodes = (data.bundles || []).map((b) => ({ name: b.name, size: b.size }));
                 const payload = { version: 1, nodes };
                 openActionModal({
@@ -5366,7 +5418,7 @@
                 return heavy.slice(0, 8);
             };
 
-            const runA11yAudit = () => {
+            runA11yAudit = () => {
                 const issues = [];
                 const elements = Array.from(document.querySelectorAll('*'));
                 elements.forEach((el) => {
@@ -5471,7 +5523,7 @@
                 if (a11yExportBtn) a11yExportBtn.disabled = a11yIssuesState.length === 0;
             };
 
-            const fixCommonA11y = () => {
+            fixCommonA11y = () => {
                 let fixes = 0;
                 a11yIssuesState.forEach((issue) => {
                     const el = issue.element;
@@ -5500,7 +5552,7 @@
                 runA11yAudit();
             };
 
-            const exportA11yReport = () => {
+            exportA11yReport = () => {
                 const payload = a11yIssuesState.map((i) => ({
                     type: i.type,
                     severity: i.severity,
@@ -8383,6 +8435,13 @@
             transientSpace.textContent = `${space.total_readable || '0'} (expired ${space.expired_readable || '0'})`;
         };
 
+        const formatTransientBytes = (val) => {
+            const num = Number(val) || 0;
+            if (num >= 1024 * 1024) return `${(num / (1024 * 1024)).toFixed(1)} MB`;
+            if (num >= 1024) return `${(num / 1024).toFixed(1)} KB`;
+            return `${Math.round(num)} B`;
+        };
+
         const renderTransientTable = () => {
             if (!transientTable) return;
             transientTable.innerHTML = '';
@@ -8410,7 +8469,7 @@
                 const ts = item.expires ? new Date(item.expires * 1000).toLocaleString() : 'n/a';
                 expires.textContent = ts;
                 const size = document.createElement('td');
-                size.textContent = formatBytes(item.size || 0);
+                size.textContent = formatTransientBytes(item.size || 0);
                 const source = document.createElement('td');
                 source.textContent = item.source || 'unknown';
                 const type = document.createElement('td');
@@ -8613,7 +8672,8 @@
         const detectCssConflicts = () => {
             const conflicts = [];
             const selectorMap = new Map();
-            (document.styleSheets || []).forEach((sheet) => {
+            const sheets = Array.from(document.styleSheets || []);
+            sheets.forEach((sheet) => {
                 const href = sheet.href || '';
                 const plugin = mapUrlToPlugin(href);
                 if (!plugin) return;
